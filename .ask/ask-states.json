@@ -1,0 +1,41 @@
+{
+  "askcliStatesVersion": "2020-03-31",
+  "profiles": {
+    "default": {
+      "skillInfrastructure": {
+        "@ask-cli/cfn-deployer": {
+          "deployState": {
+            "default": {
+              "s3": {
+                "bucket": "ask-carepulse-default-useast1-1790792596710",
+                "key": "endpoint/build.zip"
+              },
+              "stackId": "arn:aws:cloudformation:us-east-1:171489363667:stack/ask-CarePulse-default-skillStack-1790792596710/0275efa0-bcfc-11f1-b38f-12ffd0b24009",
+              "outputs": [
+                {
+                  "OutputKey": "SkillEndpoint",
+                  "OutputValue": "arn:aws:lambda:us-east-1:171489363667:function:ask-CarePulse-default-skillStac-AlexaSkillFunction-bMieLwrYt6ZE",
+                  "Description": "LambdaARN for the regional endpoint"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "deploymentStatus": "IN_PROGRESS",
+      "skillMetadata": {
+        "lastImportId": "amzn1.ask-package.import.f09edd1c-65f3-4dff-bd92-8dcced2c93f8",
+        "lastImportTimestamp": "2026-09-30T18:21:22.016Z",
+        "lastDeployHash": "0aCL+7Q5DoaR2dqef2PKCtvKTOw=",
+        "lastDeployType": "interaction-model"
+      },
+      "skillId": "amzn1.ask.skill.0bdc62a9-23ac-458d-b4b8-773ca695ba65",
+      "code": {
+        "default": {
+          "lastDeployHash": "353JGIhfGNvVN1ypdMgGZpNor2k="
+        },
+        "lastDeployTimestamp": "2026-09-30T18:24:16.647Z"
+      }
+    }
+  }
+}
