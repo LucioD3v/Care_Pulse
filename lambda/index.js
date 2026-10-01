@@ -1,47 +1,150 @@
-// This sample demonstrates handling intents from an Alexa skill using the Alexa Skills Kit SDK (v2).
-// Please visit https://alexa.design/cookbook for additional examples on implementing slots, dialog management,
-// session persistence, api calls, and more.
 const Alexa = require('ask-sdk-core');
+
+const VITAL_TYPES = {
+    'blood pressure': { name: 'blood pressure', unit: 'millimeters of mercury' },
+    'blood pressure reading': { name: 'blood pressure', unit: 'millimeters of mercury' },
+    bloodpressure: { name: 'blood pressure', unit: 'millimeters of mercury' },
+    bp: { name: 'blood pressure', unit: 'millimeters of mercury' },
+    pressure: { name: 'blood pressure', unit: 'millimeters of mercury' },
+    temperature: { name: 'temperature', unit: 'degrees' },
+    'body temperature': { name: 'temperature', unit: 'degrees' },
+    'heart rate': { name: 'heart rate', unit: 'beats per minute' },
+    'heart rate reading': { name: 'heart rate', unit: 'beats per minute' },
+    heartrate: { name: 'heart rate', unit: 'beats per minute' },
+    pulse: { name: 'heart rate', unit: 'beats per minute' },
+    sleep: { name: 'sleep', unit: 'hours' },
+    'sleep duration': { name: 'sleep', unit: 'hours' },
+    'hours of sleep': { name: 'sleep', unit: 'hours' }
+};
+
+function getSlotValue(handlerInput, slotName) {
+    const slots = handlerInput.requestEnvelope.request.intent.slots || {};
+    const slot = slots[slotName];
+    if (!slot) {
+        return '';
+    }
+
+    const authorities = slot.resolutions && slot.resolutions.resolutionsPerAuthority;
+    if (authorities) {
+        const match = authorities.find(authority => authority.status && authority.status.code === 'ER_SUCCESS_MATCH');
+        const resolvedValue = match && match.values && match.values[0].value.name;
+        if (resolvedValue) {
+            return resolvedValue.trim();
+        }
+    }
+
+    return slot.value ? slot.value.trim() : '';
+}
+
+function elicitSlot(handlerInput, slotName, prompt) {
+    return handlerInput.responseBuilder
+        .speak(prompt)
+        .reprompt(prompt)
+        .addElicitSlotDirective(slotName)
+        .getResponse();
+}
+
+function formatNumber(value) {
+    return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value);
+}
 
 const LaunchRequestHandler = {
     canHandle(handlerInput) {
         return Alexa.getRequestType(handlerInput.requestEnvelope) === 'LaunchRequest';
     },
     handle(handlerInput) {
-        const speakOutput = 'Welcome to Care Pulse. Your proactive family health assistant is online. Would you like to log a vital sign or check the latest trends?';
+        const speakOutput = 'Welcome to Care Pulse. I can help you report a vital sign, ask about health trends, or request a caregiver alert. What would you like to do?';
         return handlerInput.responseBuilder
             .speak(speakOutput)
-            .reprompt('You can say, log blood pressure, or check family trends.')
+            .reprompt('You can say, log a vital sign, check my health trends, or request a caregiver alert.')
             .getResponse();
     }
 };
-const HelloWorldIntentHandler = {
+
+const LogVitalIntentHandler = {
     canHandle(handlerInput) {
         return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
-            && Alexa.getIntentName(handlerInput.requestEnvelope) === 'HelloWorldIntent';
+            && Alexa.getIntentName(handlerInput.requestEnvelope) === 'LogVitalIntent';
     },
     handle(handlerInput) {
-        const speakOutput = 'Hello World!';
+        const metricInput = getSlotValue(handlerInput, 'metricType').toLowerCase();
+        const metric = VITAL_TYPES[metricInput];
+        if (!metric) {
+            return elicitSlot(handlerInput, 'metricType', 'Which vital sign would you like to report: blood pressure, temperature, heart rate, or sleep?');
+        }
+
+        const value = Number(getSlotValue(handlerInput, 'value'));
+        if (!Number.isFinite(value) || value <= 0) {
+            return elicitSlot(handlerInput, 'value', `What is the ${metric.name} reading?`);
+        }
+
+        const suppliedUnit = getSlotValue(handlerInput, 'unit');
+        const temperatureUnit = suppliedUnit.toLowerCase();
+        if (metric.name === 'temperature'
+            && !['celsius', 'degrees celsius', 'centigrade', 'fahrenheit', 'degrees fahrenheit'].includes(temperatureUnit)) {
+            return elicitSlot(handlerInput, 'unit', 'Is that temperature in Celsius or Fahrenheit?');
+        }
+
+        if (metric.name === 'blood pressure') {
+            const diastolic = Number(getSlotValue(handlerInput, 'diastolic'));
+            if (!Number.isFinite(diastolic) || diastolic <= 0) {
+                return elicitSlot(handlerInput, 'diastolic', 'What is the bottom number of the blood pressure reading?');
+            }
+
+            return handlerInput.responseBuilder
+                .speak(`I heard blood pressure ${formatNumber(value)} over ${formatNumber(diastolic)} millimeters of mercury. Health readings are not connected to storage yet, so this has not been saved.`)
+                .getResponse();
+        }
+
+        const unit = metric.name === 'temperature'
+            ? temperatureUnit.includes('fahrenheit') ? 'degrees Fahrenheit' : 'degrees Celsius'
+            : metric.unit;
         return handlerInput.responseBuilder
-            .speak(speakOutput)
-            //.reprompt('add a reprompt if you want to keep the session open for the user to respond')
+            .speak(`I heard ${metric.name}, ${formatNumber(value)} ${unit}. Health readings are not connected to storage yet, so this has not been saved.`)
             .getResponse();
     }
 };
+
+const CheckTrendsIntentHandler = {
+    canHandle(handlerInput) {
+        return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
+            && Alexa.getIntentName(handlerInput.requestEnvelope) === 'CheckTrendsIntent';
+    },
+    handle(handlerInput) {
+        const timeframe = getSlotValue(handlerInput, 'timeframe');
+        const period = timeframe ? ` for ${timeframe}` : '';
+        return handlerInput.responseBuilder
+            .speak(`I can't access health trends${period} yet because health history is not connected. Once it is, I can summarize changes for you.`)
+            .getResponse();
+    }
+};
+
+const EmergencyAlertIntentHandler = {
+    canHandle(handlerInput) {
+        return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
+            && Alexa.getIntentName(handlerInput.requestEnvelope) === 'EmergencyAlertIntent';
+    },
+    handle(handlerInput) {
+        return handlerInput.responseBuilder
+            .speak('Caregiver alerts are not connected yet, so I have not sent an alert. If someone is in immediate danger or needs urgent medical help, call your local emergency number now.')
+            .getResponse();
+    }
+};
+
 const HelpIntentHandler = {
     canHandle(handlerInput) {
         return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
             && Alexa.getIntentName(handlerInput.requestEnvelope) === 'AMAZON.HelpIntent';
     },
     handle(handlerInput) {
-        const speakOutput = 'You can say hello to me! How can I help?';
-
+        const speakOutput = 'You can say, log my temperature, check my health trends, or alert my caregiver. Health history and caregiver alerts are not connected yet.';
         return handlerInput.responseBuilder
             .speak(speakOutput)
-            .reprompt(speakOutput)
+            .reprompt('Would you like to log a vital sign, check health trends, or alert a caregiver?')
             .getResponse();
     }
 };
+
 const CancelAndStopIntentHandler = {
     canHandle(handlerInput) {
         return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
@@ -49,26 +152,19 @@ const CancelAndStopIntentHandler = {
                 || Alexa.getIntentName(handlerInput.requestEnvelope) === 'AMAZON.StopIntent');
     },
     handle(handlerInput) {
-        const speakOutput = 'Goodbye!';
         return handlerInput.responseBuilder
-            .speak(speakOutput)
+            .speak('Take care. I am here if you need me.')
             .getResponse();
     }
 };
 
-/* *
- * FallbackIntent triggers when a customer says something that doesn’t map to any intents in your skill
- * It must also be defined in the language model (if the locale supports it)
- * This handler can be safely added but will be ignored in locales that do not support it yet 
- * */
 const FallbackIntentHandler = {
     canHandle(handlerInput) {
         return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
             && Alexa.getIntentName(handlerInput.requestEnvelope) === 'AMAZON.FallbackIntent';
     },
     handle(handlerInput) {
-        const speakOutput = 'Sorry, I don\'t know about that. Please try again.';
-
+        const speakOutput = 'I can help log a vital sign, check health trends, or alert a caregiver. Which would you like?';
         return handlerInput.responseBuilder
             .speak(speakOutput)
             .reprompt(speakOutput)
@@ -76,51 +172,22 @@ const FallbackIntentHandler = {
     }
 };
 
-/* *
- * SessionEndedRequest notifies that a session was ended. This handler will be triggered when a currently open 
- * session is closed for one of the following reasons: 1) The user says "exit" or "quit". 2) The user does not 
- * respond or says something that does not match an intent defined in your voice model. 3) An error occurs 
- * */
 const SessionEndedRequestHandler = {
     canHandle(handlerInput) {
         return Alexa.getRequestType(handlerInput.requestEnvelope) === 'SessionEndedRequest';
     },
     handle(handlerInput) {
-        // Any cleanup logic goes here.
         return handlerInput.responseBuilder.getResponse();
     }
 };
 
-// The intent reflector is used for interaction model testing and debugging.
-// It will simply repeat the intent the user said. You can create custom handlers
-// for your intents by defining them above, then also adding them to the request
-// handler chain below.
-const IntentReflectorHandler = {
-    canHandle(handlerInput) {
-        return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest';
-    },
-    handle(handlerInput) {
-        const intentName = Alexa.getIntentName(handlerInput.requestEnvelope);
-        const speakOutput = `You just triggered ${intentName}`;
-
-        return handlerInput.responseBuilder
-            .speak(speakOutput)
-            //.reprompt('add a reprompt if you want to keep the session open for the user to respond')
-            .getResponse();
-    }
-};
-
-// Generic error handling to capture any syntax or routing errors. If you receive an error
-// stating the request handler chain is not found, you have not implemented a handler for
-// the intent being invoked or included it in the skill builder below.
 const ErrorHandler = {
     canHandle() {
         return true;
     },
     handle(handlerInput, error) {
-        console.log(`~~~~ Error handled: ${error.stack}`);
-        const speakOutput = `Sorry, I had trouble doing what you asked. Please try again.`;
-
+        console.error('Care Pulse request failed:', error);
+        const speakOutput = 'I am sorry, something went wrong. Please try again in a moment.';
         return handlerInput.responseBuilder
             .speak(speakOutput)
             .reprompt(speakOutput)
@@ -128,20 +195,16 @@ const ErrorHandler = {
     }
 };
 
-// The SkillBuilder acts as the entry point for your skill, routing all request and response
-// payloads to the handlers above. Make sure any new handlers or interceptors you've
-// defined are included below. The order matters - they're processed top to bottom.
 exports.handler = Alexa.SkillBuilders.custom()
     .addRequestHandlers(
         LaunchRequestHandler,
-        HelloWorldIntentHandler,
+        LogVitalIntentHandler,
+        CheckTrendsIntentHandler,
+        EmergencyAlertIntentHandler,
         HelpIntentHandler,
         CancelAndStopIntentHandler,
         FallbackIntentHandler,
-        SessionEndedRequestHandler,
-        IntentReflectorHandler, // make sure IntentReflectorHandler is last so it doesn't override your custom intent handlers
-        ) 
-    .addErrorHandlers(
-        ErrorHandler,
-        )
+        SessionEndedRequestHandler
+    )
+    .addErrorHandlers(ErrorHandler)
     .lambda();

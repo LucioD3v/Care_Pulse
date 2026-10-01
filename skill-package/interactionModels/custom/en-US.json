@@ -1,44 +1,270 @@
 {
-    "interactionModel": {
-        "languageModel": {
-            "invocationName": "care pulse",
-            "intents": [
-                {
-                    "name": "AMAZON.CancelIntent",
-                    "samples": []
-                },
-                {
-                    "name": "AMAZON.HelpIntent",
-                    "samples": []
-                },
-                {
-                    "name": "AMAZON.StopIntent",
-                    "samples": []
-                },
-                {
-                    "name": "HelloWorldIntent",
-                    "slots": [],
-                    "samples": [
-                        "hello",
-                        "how are you",
-                        "say hi world",
-                        "say hi",
-                        "hi",
-                        "say hello world",
-                        "say hello"
-                    ]
-                },
-                {
-                    "name": "AMAZON.NavigateHomeIntent",
-                    "samples": []
-                },
-                {
-                  "name": "AMAZON.FallbackIntent",
-                  "samples": []
-                }
-            ],
-            "types": []
+  "interactionModel": {
+    "dialog": {
+      "delegationStrategy": "SKILL_RESPONSE",
+      "intents": [
+        {
+          "name": "LogVitalIntent",
+          "slots": [
+            {
+              "name": "metricType",
+              "type": "VITAL_TYPE",
+              "elicitationRequired": true,
+              "prompts": {
+                "elicitation": "Elicit.LogVital.MetricType"
+              }
+            },
+            {
+              "name": "value",
+              "type": "AMAZON.NUMBER",
+              "elicitationRequired": true,
+              "prompts": {
+                "elicitation": "Elicit.LogVital.Value"
+              }
+            },
+            {
+              "name": "diastolic",
+              "type": "AMAZON.NUMBER",
+              "elicitationRequired": false
+            },
+            {
+              "name": "unit",
+              "type": "TEMPERATURE_UNIT",
+              "elicitationRequired": false
+            }
+          ]
         }
-    }
+      ]
+    },
+    "languageModel": {
+      "invocationName": "care pulse",
+      "intents": [
+        {
+          "name": "LogVitalIntent",
+          "slots": [
+            {
+              "name": "metricType",
+              "type": "VITAL_TYPE"
+            },
+            {
+              "name": "value",
+              "type": "AMAZON.NUMBER"
+            },
+            {
+              "name": "diastolic",
+              "type": "AMAZON.NUMBER"
+            },
+            {
+              "name": "unit",
+              "type": "TEMPERATURE_UNIT"
+            }
+          ],
+          "samples": [
+            "log {metricType}",
+            "log {value} {metricType}",
+            "record {metricType} as {value}",
+            "my {metricType} is {value}",
+            "my {metricType} is {value} over {diastolic}",
+            "log {value} {unit} for my {metricType}",
+            "record my {metricType} reading"
+          ]
+        },
+        {
+          "name": "CheckTrendsIntent",
+          "slots": [
+            {
+              "name": "timeframe",
+              "type": "TIMEFRAME"
+            }
+          ],
+          "samples": [
+            "check my health trends",
+            "check my health trends for {timeframe}",
+            "how is my health",
+            "how have I been doing {timeframe}",
+            "summarize my health history",
+            "summarize my health history for {timeframe}"
+          ]
+        },
+        {
+          "name": "EmergencyAlertIntent",
+          "slots": [
+            {
+              "name": "severity",
+              "type": "ALERT_SEVERITY"
+            },
+            {
+              "name": "message",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "send an emergency alert",
+            "alert my caregiver",
+            "send a {severity} alert",
+            "tell my caregiver {message}",
+            "contact my caregiver because {message}"
+          ]
+        },
+        {
+          "name": "AMAZON.CancelIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.HelpIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.StopIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.NavigateHomeIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.FallbackIntent",
+          "samples": []
+        }
+      ],
+      "types": [
+        {
+          "name": "VITAL_TYPE",
+          "values": [
+            {
+              "name": {
+                "value": "blood pressure",
+                "synonyms": [
+                  "blood pressure reading",
+                  "bp"
+                ]
+              }
+            },
+            {
+              "name": {
+                "value": "temperature",
+                "synonyms": [
+                  "body temperature"
+                ]
+              }
+            },
+            {
+              "name": {
+                "value": "heart rate",
+                "synonyms": [
+                  "pulse",
+                  "heart rate reading"
+                ]
+              }
+            },
+            {
+              "name": {
+                "value": "sleep",
+                "synonyms": [
+                  "sleep duration",
+                  "hours of sleep"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "TEMPERATURE_UNIT",
+          "values": [
+            {
+              "name": {
+                "value": "celsius",
+                "synonyms": [
+                  "degrees celsius",
+                  "centigrade"
+                ]
+              }
+            },
+            {
+              "name": {
+                "value": "fahrenheit",
+                "synonyms": [
+                  "degrees fahrenheit"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "TIMEFRAME",
+          "values": [
+            {
+              "name": {
+                "value": "today",
+                "synonyms": [
+                  "this day"
+                ]
+              }
+            },
+            {
+              "name": {
+                "value": "this week",
+                "synonyms": [
+                  "the past week",
+                  "last seven days"
+                ]
+              }
+            },
+            {
+              "name": {
+                "value": "this month",
+                "synonyms": [
+                  "the past month",
+                  "last thirty days"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "ALERT_SEVERITY",
+          "values": [
+            {
+              "name": {
+                "value": "urgent",
+                "synonyms": [
+                  "high priority",
+                  "high"
+                ]
+              }
+            },
+            {
+              "name": {
+                "value": "routine",
+                "synonyms": [
+                  "normal",
+                  "low priority"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "prompts": [
+      {
+        "id": "Elicit.LogVital.MetricType",
+        "variations": [
+          {
+            "type": "PlainText",
+            "value": "Which vital sign would you like to report?"
+          }
+        ]
+      },
+      {
+        "id": "Elicit.LogVital.Value",
+        "variations": [
+          {
+            "type": "PlainText",
+            "value": "What is the reading?"
+          }
+        ]
+      }
+    ]
   }
-  
+}
