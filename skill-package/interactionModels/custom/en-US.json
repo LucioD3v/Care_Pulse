@@ -1,109 +1,54 @@
 {
   "interactionModel": {
-    "dialog": {
-      "delegationStrategy": "SKILL_RESPONSE",
-      "intents": [
-        {
-          "name": "LogVitalIntent",
-          "slots": [
-            {
-              "name": "metricType",
-              "type": "VITAL_TYPE",
-              "elicitationRequired": true,
-              "prompts": {
-                "elicitation": "Elicit.LogVital.MetricType"
-              }
-            },
-            {
-              "name": "value",
-              "type": "AMAZON.NUMBER",
-              "elicitationRequired": true,
-              "prompts": {
-                "elicitation": "Elicit.LogVital.Value"
-              }
-            },
-            {
-              "name": "diastolic",
-              "type": "AMAZON.NUMBER",
-              "elicitationRequired": false
-            },
-            {
-              "name": "unit",
-              "type": "TEMPERATURE_UNIT",
-              "elicitationRequired": false
-            }
-          ]
-        }
-      ]
-    },
     "languageModel": {
       "invocationName": "care pulse",
       "intents": [
         {
           "name": "LogVitalIntent",
           "slots": [
-            {
-              "name": "metricType",
-              "type": "VITAL_TYPE"
-            },
-            {
-              "name": "value",
-              "type": "AMAZON.NUMBER"
-            },
-            {
-              "name": "diastolic",
-              "type": "AMAZON.NUMBER"
-            },
-            {
-              "name": "unit",
-              "type": "TEMPERATURE_UNIT"
-            }
+            { "name": "vitalType", "type": "VITAL_TYPE" },
+            { "name": "value", "type": "AMAZON.SearchQuery" },
+            { "name": "memberName", "type": "AMAZON.Person" }
           ],
           "samples": [
-            "log {metricType}",
-            "log {value} {metricType}",
-            "record {metricType} as {value}",
-            "my {metricType} is {value}",
-            "my {metricType} is {value} over {diastolic}",
-            "log {value} {unit} for my {metricType}",
-            "record my {metricType} reading"
+            "log {vitalType} for {memberName} as {value}",
+            "record {vitalType} for {memberName} {value}",
+            "add {value} for {memberName} {vitalType}",
+            "{memberName} has a {vitalType} reading of {value}",
+            "save {vitalType} reading {value} for {memberName}",
+            "log my {vitalType} as {value}",
+            "record my {vitalType} {value}"
           ]
         },
         {
           "name": "CheckTrendsIntent",
           "slots": [
-            {
-              "name": "timeframe",
-              "type": "TIMEFRAME"
-            }
+            { "name": "memberName", "type": "AMAZON.Person" },
+            { "name": "timeframe", "type": "TIMEFRAME" }
           ],
           "samples": [
-            "check my health trends",
-            "check my health trends for {timeframe}",
-            "how is my health",
-            "how have I been doing {timeframe}",
-            "summarize my health history",
-            "summarize my health history for {timeframe}"
+            "check health trends for {memberName} {timeframe}",
+            "how has {memberName} been doing {timeframe}",
+            "summarize {memberName} health this week",
+            "show me health trends for {memberName}",
+            "how is {memberName} doing today",
+            "check my health trends {timeframe}",
+            "summarize my health history"
           ]
         },
         {
-          "name": "EmergencyAlertIntent",
+          "name": "TriggerAlertIntent",
           "slots": [
-            {
-              "name": "severity",
-              "type": "ALERT_SEVERITY"
-            },
-            {
-              "name": "message",
-              "type": "AMAZON.SearchQuery"
-            }
+            { "name": "memberName", "type": "AMAZON.Person" }
           ],
           "samples": [
-            "send an emergency alert",
+            "alert my caregiver for {memberName}",
+            "send a caregiver alert for {memberName}",
+            "ask someone to check on {memberName}",
+            "get help for {memberName}",
+            "send an emergency alert for {memberName}",
             "alert my caregiver",
-            "send a {severity} alert",
-            "tell my caregiver {message}",
-            "contact my caregiver because {message}"
+            "send a caregiver alert"
           ]
         },
         {
@@ -169,28 +114,6 @@
           ]
         },
         {
-          "name": "TEMPERATURE_UNIT",
-          "values": [
-            {
-              "name": {
-                "value": "celsius",
-                "synonyms": [
-                  "degrees celsius",
-                  "centigrade"
-                ]
-              }
-            },
-            {
-              "name": {
-                "value": "fahrenheit",
-                "synonyms": [
-                  "degrees fahrenheit"
-                ]
-              }
-            }
-          ]
-        },
-        {
           "name": "TIMEFRAME",
           "values": [
             {
@@ -220,51 +143,8 @@
               }
             }
           ]
-        },
-        {
-          "name": "ALERT_SEVERITY",
-          "values": [
-            {
-              "name": {
-                "value": "urgent",
-                "synonyms": [
-                  "high priority",
-                  "high"
-                ]
-              }
-            },
-            {
-              "name": {
-                "value": "routine",
-                "synonyms": [
-                  "normal",
-                  "low priority"
-                ]
-              }
-            }
-          ]
         }
       ]
-    },
-    "prompts": [
-      {
-        "id": "Elicit.LogVital.MetricType",
-        "variations": [
-          {
-            "type": "PlainText",
-            "value": "Which vital sign would you like to report?"
-          }
-        ]
-      },
-      {
-        "id": "Elicit.LogVital.Value",
-        "variations": [
-          {
-            "type": "PlainText",
-            "value": "What is the reading?"
-          }
-        ]
-      }
-    ]
+    }
   }
 }

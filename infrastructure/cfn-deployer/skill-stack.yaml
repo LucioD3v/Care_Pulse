@@ -4,6 +4,11 @@ Parameters:
     Type: String
   LambdaRuntime:
     Type: String
+    Default: nodejs22.x
+    AllowedValues:
+      - nodejs22.x
+      - nodejs24.x
+    Description: Supported Lambda Node.js runtime (current AWS SDK requires Node.js 20 or newer).
   LambdaHandler:
     Type: String
   CodeBucket:
@@ -12,6 +17,9 @@ Parameters:
     Type: String
   CodeVersion:
     Type: String
+  BedrockModelId:
+    Type: String
+    Default: ''
 Resources:
   AlexaSkillIAMRole:
     Type: AWS::IAM::Role
@@ -35,6 +43,20 @@ Resources:
                 Action:
                   - logs:*
                 Resource: arn:aws:logs:*:*:*
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:Query
+                Resource: !GetAtt HealthMetricsTable.Arn
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref CaregiverAlertsTopic
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource: '*'
   AlexaSkillFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -47,6 +69,31 @@ Resources:
       Role: !GetAtt AlexaSkillIAMRole.Arn
       MemorySize: 512
       Timeout: 60
+      Environment:
+        Variables:
+          HEALTH_TABLE_NAME: !Ref HealthMetricsTable
+          SNS_TOPIC_ARN: !Ref CaregiverAlertsTopic
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+  HealthMetricsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: memberName
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: memberName
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      SSESpecification:
+        SSEEnabled: true
+  CaregiverAlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: CarePulse caregiver alerts
   AlexaSkillFunctionEventPermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -70,3 +117,6 @@ Outputs:
   SkillEndpoint:
     Description: LambdaARN for the regional endpoint
     Value: !GetAtt AlexaSkillFunction.Arn
+  CaregiverAlertsTopicArn:
+    Description: Subscribe caregiver email or SMS endpoints to this SNS topic.
+    Value: !Ref CaregiverAlertsTopic
