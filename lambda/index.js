@@ -1,43 +1,92 @@
-const Alexa = require('ask-sdk-core');
-const { BedrockRuntimeClient, ConverseCommand } = require('@aws-sdk/client-bedrock-runtime');
-const { logHealthMetric, getHealthHistory, analyzeHealthTrends, triggerCaregiverAlert } = require('./mcp_client');
+'use strict';
 
-const VITAL_TYPES = {
-    'blood pressure': { name: 'blood pressure', unit: 'mmHg' },
-    'blood pressure reading': { name: 'blood pressure', unit: 'mmHg' },
-    bloodpressure: { name: 'blood pressure', unit: 'mmHg' },
-    bp: { name: 'blood pressure', unit: 'mmHg' },
-    pressure: { name: 'blood pressure', unit: 'mmHg' },
-    temperature: { name: 'temperature', unit: 'degrees Celsius' },
-    'body temperature': { name: 'temperature', unit: 'degrees Celsius' },
-    'heart rate': { name: 'heart rate', unit: 'beats per minute' },
-    'heart rate reading': { name: 'heart rate', unit: 'beats per minute' },
-    heartrate: { name: 'heart rate', unit: 'beats per minute' },
-    pulse: { name: 'heart rate', unit: 'beats per minute' },
-    sleep: { name: 'sleep', unit: 'hours' },
-    'sleep duration': { name: 'sleep', unit: 'hours' },
-    'hours of sleep': { name: 'sleep', unit: 'hours' }
+const { createHash } = require('node:crypto');
+const Alexa = require('ask-sdk-core');
+const {
+    callTool,
+    getCareContext,
+    getPendingFollowup,
+    completeFollowup,
+    evaluateAlertPolicy,
+    getWellnessSnapshot
+} = require('./mcp_client');
+const { renderVoiceObservation } = require('./voice_agent');
+
+const STATES = {
+    AWAITING_FOLLOWUP_CONFIRMATION: 'AWAITING_FOLLOWUP_CONFIRMATION',
+    AWAITING_CONSENT_CONFIRMATION: 'AWAITING_CONSENT_CONFIRMATION',
+    AWAITING_FOLLOWUP_STATUS: 'AWAITING_FOLLOWUP_STATUS'
 };
 
-const bedrockClient = new BedrockRuntimeClient({ region: process.env.AWS_REGION || 'us-east-1' });
-
 function getSlotValue(handlerInput, slotName) {
-    const slots = handlerInput.requestEnvelope.request.intent.slots || {};
-    const slot = slots[slotName];
+    const slot = handlerInput.requestEnvelope.request.intent?.slots?.[slotName];
     if (!slot) {
         return '';
     }
+    const match = slot.resolutions?.resolutionsPerAuthority
+        ?.find(authority => authority.status?.code === 'ER_SUCCESS_MATCH');
+    return String(match?.values?.[0]?.value?.name || slot.value || '').trim();
+}
 
-    const authorities = slot.resolutions && slot.resolutions.resolutionsPerAuthority;
-    if (authorities) {
-        const match = authorities.find(authority => authority.status && authority.status.code === 'ER_SUCCESS_MATCH');
-        const resolvedValue = match && match.values && match.values[0].value.name;
-        if (resolvedValue) {
-            return resolvedValue.trim();
-        }
+function ownerId(handlerInput) {
+    if (process.env.DEMO_OWNER_ID) {
+        return process.env.DEMO_OWNER_ID;
     }
+    const rawUserId = handlerInput.requestEnvelope.context?.System?.user?.userId
+        || handlerInput.requestEnvelope.session?.user?.userId
+        || 'anonymous-demo-user';
+    return createHash('sha256').update(rawUserId).digest('hex').slice(0, 32);
+}
 
-    return slot.value ? String(slot.value).trim() : '';
+function defaultMemberName() {
+    return process.env.DEFAULT_MEMBER_NAME || 'Elena';
+}
+
+function escapeSsml(value) {
+    return String(value).replace(/[&<>"']/g, character => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;'
+    })[character]);
+}
+
+function localDateTime(date, timeZone) {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone,
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+    }).formatToParts(date).reduce((result, part) => {
+        result[part.type] = part.value;
+        return result;
+    }, {});
+    return {
+        date: `${parts.year}-${parts.month}-${parts.day}`,
+        time: `${parts.hour}:${parts.minute}`
+    };
+}
+
+function addOneDay(dateText) {
+    const date = new Date(`${dateText}T12:00:00Z`);
+    date.setUTCDate(date.getUTCDate() + 1);
+    return date.toISOString().slice(0, 10);
+}
+
+function followupSchedule(handlerInput, dueTime = '18:00', timezone = process.env.DEFAULT_TIME_ZONE || 'America/Mexico_City') {
+    const requestDate = new Date(handlerInput.requestEnvelope.request.timestamp || Date.now());
+    const local = localDateTime(requestDate, timezone);
+    return {
+        dueDate: dueTime > local.time ? local.date : addOneDay(local.date),
+        dueTime
+    };
+}
+
+function sessionAttributes(handlerInput) {
+    return handlerInput.attributesManager.getSessionAttributes();
+}
+
+function saveConversationState(handlerInput, values) {
+    handlerInput.attributesManager.setSessionAttributes({
+        ...sessionAttributes(handlerInput),
+        ...values
+    });
 }
 
 function elicitSlot(handlerInput, slotName, prompt) {
@@ -48,202 +97,302 @@ function elicitSlot(handlerInput, slotName, prompt) {
         .getResponse();
 }
 
-function formatNumber(value) {
-    return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value);
+async function tracedTool(name, input) {
+    const startedAt = Date.now();
+    const result = await callTool(name, input);
+    console.info(JSON.stringify({
+        event: 'mcp_tool_completed',
+        tool: name,
+        durationMs: Date.now() - startedAt,
+        ownerId: input.ownerId,
+        memberName: input.memberName,
+        outcome: result?.source || result?.reason || 'ok'
+    }));
+    return result;
 }
 
-function parseReading(rawValue) {
-    const input = String(rawValue || '').trim().replace(/(\d+)\s+(?:point|dot)\s+(\d+)/i, '$1.$2');
-    const bloodPressure = input.match(/(\d{2,3})\s*(?:over|slash|\/)\s*(\d{2,3})/i);
-    if (bloodPressure) {
-        return { value: Number(bloodPressure[1]), diastolic: Number(bloodPressure[2]) };
+async function ensureFollowup(handlerInput, { memberName, signal, dueTime = '18:00' }) {
+    const userOwnerId = ownerId(handlerInput);
+    const existing = await getPendingFollowup({ ownerId: userOwnerId, memberName });
+    if (existing) {
+        return existing;
     }
-    const numericValue = Number(input.replace(/,/g, '.').match(/-?\d+(?:\.\d+)?/)?.[0]);
-    return Number.isFinite(numericValue) ? { value: numericValue } : null;
-}
-
-function temperatureCelsius(value, rawValue) {
-    if (/fahrenheit|\bF\b/i.test(rawValue)) {
-        return (value - 32) * 5 / 9;
-    }
-    return value;
-}
-
-function escapeSsml(value) {
-    return String(value).replace(/[&<>"']/g, character => ({
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&apos;'
-    })[character]);
-}
-
-async function assessRisk(metric, reading, memberName, unit, recentHistory) {
-    const valueForRisk = metric.name === 'temperature'
-        ? temperatureCelsius(reading.value, reading.rawValue)
-        : reading.value;
-    const deterministicRisk = metric.name === 'temperature' && valueForRisk > 38.5;
-    const fallback = {
-        alertRecommended: deterministicRisk,
-        message: deterministicRisk
-            ? `${memberName}'s temperature is above 38.5 degrees Celsius.`
-            : 'No immediate alert threshold was reached.'
-    };
-
-    if (!process.env.BEDROCK_MODEL_ID) {
-        return fallback;
-    }
-
-    try {
-        const response = await bedrockClient.send(new ConverseCommand({
-            modelId: process.env.BEDROCK_MODEL_ID,
-            system: [{ text: 'Assess the current family health reading and recent readings conservatively. You are not a clinician: do not diagnose or recommend treatment. Recommend a caregiver alert for clearly concerning readings or worsening patterns. Never ignore deterministicAlertRequired. Reply only as JSON with alertRecommended (boolean) and message (short, calm text).' }],
-            messages: [{
-                role: 'user',
-                content: [{ text: JSON.stringify({
-                    metric: metric.name,
-                    value: reading.value,
-                    unit,
-                    memberName,
-                    deterministicAlertRequired: deterministicRisk,
-                    recentReadings: recentHistory.slice(0, 20)
-                }) }]
-            }],
-            inferenceConfig: { maxTokens: 120, temperature: 0.1 }
-        }));
-        const text = response.output?.message?.content?.find(item => item.text)?.text;
-        const parsed = JSON.parse(text || '{}');
-        return {
-            alertRecommended: deterministicRisk || parsed.alertRecommended === true,
-            message: typeof parsed.message === 'string' ? parsed.message : fallback.message
-        };
-    } catch (error) {
-        console.warn('Bedrock assessment unavailable; using deterministic threshold:', error.message);
-        return fallback;
-    }
+    const context = await getCareContext({ ownerId: userOwnerId, memberName });
+    const schedule = followupSchedule(handlerInput, dueTime, context.timezone);
+    return tracedTool('create_followup', {
+        ownerId: userOwnerId,
+        memberName,
+        signal,
+        ...schedule
+    });
 }
 
 const LaunchRequestHandler = {
     canHandle(handlerInput) {
         return Alexa.getRequestType(handlerInput.requestEnvelope) === 'LaunchRequest';
     },
-    handle(handlerInput) {
-        const speakOutput = '<speak>Welcome to Care Pulse. I can help you log a family member\'s vital signs, check health trends, or contact a caregiver. What would you like to do?</speak>';
-        return handlerInput.responseBuilder
-            .speak(speakOutput)
-            .reprompt('You can say, log a vital sign, check my health trends, or request a caregiver alert.')
-            .getResponse();
-    }
-};
-
-const LogVitalIntentHandler = {
-    canHandle(handlerInput) {
-        return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
-            && Alexa.getIntentName(handlerInput.requestEnvelope) === 'LogVitalIntent';
-    },
     async handle(handlerInput) {
-        const metricInput = getSlotValue(handlerInput, 'vitalType').toLowerCase();
-        const metric = VITAL_TYPES[metricInput];
-        if (!metric) {
-            return elicitSlot(handlerInput, 'vitalType', 'Which vital sign would you like to report: blood pressure, temperature, heart rate, or sleep?');
-        }
-
-        const rawValue = getSlotValue(handlerInput, 'value');
-        const reading = parseReading(rawValue);
-        if (!reading || reading.value <= 0 || (reading.diastolic && reading.diastolic <= 0)) {
-            return elicitSlot(handlerInput, 'value', `What is the ${metric.name} reading? For blood pressure, say both numbers, such as 120 over 80.`);
-        }
-
-        reading.rawValue = rawValue;
-        const memberName = getSlotValue(handlerInput, 'memberName') || 'you';
-        const unit = metric.name === 'temperature' && /fahrenheit|degrees?\s*f\b/i.test(rawValue)
-            ? 'degrees Fahrenheit'
-            : metric.unit;
-        await logHealthMetric({
-            type: metric.name,
-            value: reading.diastolic ? `${reading.value}/${reading.diastolic}` : reading.value,
-            unit,
-            date: new Date().toISOString(),
-            memberName
+        const userOwnerId = ownerId(handlerInput);
+        const memberName = defaultMemberName();
+        const context = await getCareContext({ ownerId: userOwnerId, memberName });
+        const now = localDateTime(new Date(handlerInput.requestEnvelope.request.timestamp || Date.now()), context.timezone);
+        const dueFollowup = await getPendingFollowup({
+            ownerId: userOwnerId,
+            memberName,
+            dueOnly: true,
+            localDate: now.date,
+            localTime: now.time
         });
-        const recentHistory = await getHealthHistory({ memberName, timeframe: 'this week', limit: 20 });
-        const risk = await assessRisk(metric, reading, memberName, unit, recentHistory);
-        let alertResult;
-        if (risk.alertRecommended) {
-            alertResult = await triggerCaregiverAlert({
+        if (dueFollowup) {
+            saveConversationState(handlerInput, {
+                conversationState: STATES.AWAITING_FOLLOWUP_STATUS,
                 memberName,
-                metric: metric.name,
-                value: reading.diastolic ? `${reading.value}/${reading.diastolic}` : reading.value,
-                unit,
-                message: risk.message
+                signal: dueFollowup.signal,
+                followupId: dueFollowup.followupId
             });
+            const prompt = `${memberName}, we planned to check how you were feeling. Do you feel better, the same, or worse?`;
+            return handlerInput.responseBuilder.speak(prompt).reprompt(prompt).getResponse();
         }
-
-        const valueSpeech = reading.diastolic
-            ? `${formatNumber(reading.value)} over ${formatNumber(reading.diastolic)} ${unit}`
-            : `${formatNumber(reading.value)} ${unit}`;
-        const confirmation = risk.alertRecommended
-            ? alertResult.sent
-                ? `I have recorded ${memberName}'s ${metric.name} as ${valueSpeech}. This reading may need attention, and I have sent an alert to the caregiver notification service. Please confirm they received it.`
-                : `I have recorded ${memberName}'s ${metric.name} as ${valueSpeech}. This reading may need attention, but I could not send the caregiver alert. Please contact them directly.`
-            : `I have recorded ${memberName}'s ${metric.name} as ${valueSpeech}.`;
-        return handlerInput.responseBuilder.speak(`<speak>${escapeSsml(confirmation)}</speak>`).getResponse();
+        const prompt = 'Welcome to Care Pulse. You can tell me how you feel, ask for a wellness summary, or schedule a check-in. How can I help?';
+        return handlerInput.responseBuilder.speak(prompt).reprompt(prompt).getResponse();
     }
 };
 
-const CheckTrendsIntentHandler = {
+const ReportWellnessIntentHandler = {
     canHandle(handlerInput) {
         return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
-            && Alexa.getIntentName(handlerInput.requestEnvelope) === 'CheckTrendsIntent';
+            && Alexa.getIntentName(handlerInput.requestEnvelope) === 'ReportWellnessIntent';
     },
     async handle(handlerInput) {
-        const memberName = getSlotValue(handlerInput, 'memberName') || 'you';
-        const timeframe = getSlotValue(handlerInput, 'timeframe');
-        const history = await getHealthHistory({ memberName, timeframe: timeframe || 'this week' });
-        const trends = await analyzeHealthTrends({ memberName, timeframe: timeframe || 'this week', history });
-        const summary = await summarizeWithBedrock(memberName, timeframe || 'this week', trends);
+        const sleepHours = getSlotValue(handlerInput, 'sleepHours');
+        const signal = (getSlotValue(handlerInput, 'wellnessSignal') || (sleepHours ? 'sleep' : '')).toLowerCase();
+        if (!signal) {
+            return elicitSlot(handlerInput, 'wellnessSignal', 'What would you like me to record, for example tiredness, sleep, mood, or appetite?');
+        }
+        const memberName = getSlotValue(handlerInput, 'memberName') || defaultMemberName();
+        const state = getSlotValue(handlerInput, 'intensity') || (sleepHours ? 'reported' : 'more than usual');
+        const userOwnerId = ownerId(handlerInput);
+        await tracedTool('get_care_context', { ownerId: userOwnerId, memberName });
+        await tracedTool('log_wellness_event', {
+            ownerId: userOwnerId,
+            memberName,
+            signal,
+            state,
+            details: sleepHours ? `${sleepHours} hours` : '',
+            ...(sleepHours ? { numericValue: Number(sleepHours) } : {})
+        });
+        const comparison = await tracedTool('compare_with_baseline', {
+            ownerId: userOwnerId,
+            memberName,
+            signal
+        });
+        saveConversationState(handlerInput, {
+            conversationState: STATES.AWAITING_FOLLOWUP_CONFIRMATION,
+            memberName,
+            signal
+        });
+        const observation = await renderVoiceObservation({ memberName, signal, comparison });
+        const prompt = `${observation} Would you like me to check in again at six?`;
         return handlerInput.responseBuilder
-            .speak(`<speak>${escapeSsml(summary)}</speak>`)
+            .speak(`<speak>${escapeSsml(prompt)}</speak>`)
+            .reprompt('Would you like a follow-up at six?')
+            .withSimpleCard('CarePulse wellness check', `${memberName}: ${signal}\n${comparison.summary}`)
             .getResponse();
     }
 };
 
-async function summarizeWithBedrock(memberName, timeframe, trends) {
-    if (!process.env.BEDROCK_MODEL_ID || !trends.length) {
-        return trends.length
-            ? `For ${memberName}, ${timeframe}: ${trends.join('. ')}.`
-            : `I don’t have enough recent readings for ${memberName} to summarize ${timeframe} yet. You can log a new reading whenever you’re ready.`;
-    }
-
-    try {
-        const response = await bedrockClient.send(new ConverseCommand({
-            modelId: process.env.BEDROCK_MODEL_ID,
-            system: [{ text: 'Summarize health measurement trends in one or two calm sentences. Do not diagnose or recommend treatment. State when there is not enough data.' }],
-            messages: [{ role: 'user', content: [{ text: JSON.stringify({ memberName, timeframe, trends }) }] }],
-            inferenceConfig: { maxTokens: 120, temperature: 0.3 }
-        }));
-        return response.output?.message?.content?.find(item => item.text)?.text
-            || `I found ${trends.length} recent health observations for ${memberName}.`;
-    } catch (error) {
-        console.warn('Bedrock trend summary unavailable; using local summary:', error.message);
-        return `For ${memberName}, ${timeframe}: ${trends.join('. ')}.`;
-    }
-}
-
-const CaregiverAlertHandler = {
+const ScheduleFollowupIntentHandler = {
     canHandle(handlerInput) {
         return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
-            && Alexa.getIntentName(handlerInput.requestEnvelope) === 'TriggerAlertIntent';
+            && Alexa.getIntentName(handlerInput.requestEnvelope) === 'ScheduleFollowupIntent';
     },
     async handle(handlerInput) {
-        const memberName = getSlotValue(handlerInput, 'memberName') || 'your family member';
-        const result = await triggerCaregiverAlert({ memberName, message: 'Caregiver alert requested by voice.' });
-        const speakOutput = result.sent
-            ? `I’ve sent a caregiver alert for ${memberName}. Please confirm they received it. If this is an immediate emergency, call your local emergency number now.`
-            : `I’m unable to reach the caregiver notification service right now. If someone is in immediate danger, call your local emergency number now.`;
+        const memberName = getSlotValue(handlerInput, 'memberName') || defaultMemberName();
+        const signal = getSlotValue(handlerInput, 'wellnessSignal') || 'tiredness';
+        const dueTime = getSlotValue(handlerInput, 'followupTime') || '18:00';
+        const followup = await ensureFollowup(handlerInput, { memberName, signal, dueTime });
+        const context = await getCareContext({ ownerId: ownerId(handlerInput), memberName });
+        saveConversationState(handlerInput, {
+            conversationState: STATES.AWAITING_CONSENT_CONFIRMATION,
+            memberName,
+            caregiverName: context.caregiverName,
+            signal,
+            followupId: followup.followupId
+        });
+        const prompt = `The check-in is scheduled for ${dueTime}. Do you authorize ${context.caregiverName} to receive a brief alert only if you report ${signal.replace(/-/g, ' ')} again during this follow-up?`;
+        return handlerInput.responseBuilder.speak(prompt).reprompt(prompt).getResponse();
+    }
+};
+
+const ConfigureCaregiverAlertIntentHandler = {
+    canHandle(handlerInput) {
+        return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
+            && Alexa.getIntentName(handlerInput.requestEnvelope) === 'ConfigureCaregiverAlertIntent';
+    },
+    async handle(handlerInput) {
+        const memberName = getSlotValue(handlerInput, 'memberName') || defaultMemberName();
+        const signal = getSlotValue(handlerInput, 'wellnessSignal') || sessionAttributes(handlerInput).signal || 'tiredness';
+        const context = await getCareContext({ ownerId: ownerId(handlerInput), memberName });
+        const caregiverName = getSlotValue(handlerInput, 'caregiverName') || context.caregiverName;
+        const followup = await ensureFollowup(handlerInput, { memberName, signal });
+        saveConversationState(handlerInput, {
+            conversationState: STATES.AWAITING_CONSENT_CONFIRMATION,
+            memberName,
+            caregiverName,
+            signal,
+            followupId: followup.followupId
+        });
+        const prompt = `Before I share anything, do you authorize ${caregiverName} to receive a brief alert only if you report ${signal.replace(/-/g, ' ')} again during this follow-up?`;
+        return handlerInput.responseBuilder.speak(prompt).reprompt(prompt).getResponse();
+    }
+};
+
+const CompleteFollowupIntentHandler = {
+    canHandle(handlerInput) {
+        return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
+            && Alexa.getIntentName(handlerInput.requestEnvelope) === 'CompleteFollowupIntent';
+    },
+    async handle(handlerInput) {
+        const followupStatus = getSlotValue(handlerInput, 'followupStatus').toLowerCase();
+        if (!followupStatus) {
+            return elicitSlot(handlerInput, 'followupStatus', 'Do you feel better, the same, or worse?');
+        }
+        const attributes = sessionAttributes(handlerInput);
+        const memberName = getSlotValue(handlerInput, 'memberName') || attributes.memberName || defaultMemberName();
+        const userOwnerId = ownerId(handlerInput);
+        const followup = await getPendingFollowup({ ownerId: userOwnerId, memberName });
+        if (!followup) {
+            return handlerInput.responseBuilder
+                .speak(`I do not have a pending check-in for ${memberName}. You can ask me to schedule one.`)
+                .getResponse();
+        }
+        await tracedTool('log_wellness_event', {
+            ownerId: userOwnerId,
+            memberName,
+            signal: followup.signal,
+            state: followupStatus,
+            details: 'scheduled follow-up response'
+        });
+        await completeFollowup({ followup, status: followupStatus });
+        const context = await getCareContext({ ownerId: userOwnerId, memberName });
+        const decision = await evaluateAlertPolicy({
+            ownerId: userOwnerId,
+            memberName,
+            caregiverName: context.caregiverName,
+            signal: followup.signal,
+            followupId: followup.followupId,
+            followupStatus
+        });
+        let speech;
+        let alertStatus = 'No alert needed';
+        if (decision.allowed) {
+            const alert = await tracedTool('send_caregiver_alert', {
+                ownerId: userOwnerId,
+                memberName,
+                caregiverName: context.caregiverName,
+                signal: followup.signal,
+                followupStatus,
+                consentId: decision.consentId,
+                authorized: true
+            });
+            alertStatus = alert.sent ? `${context.caregiverName} notified` : 'Notification simulated';
+            speech = alert.sent
+                ? `Thank you. I recorded the follow-up and sent ${context.caregiverName} the brief alert you authorized.`
+                : `Thank you. I recorded the follow-up. The authorized alert was prepared, but the notification service is not configured, so please contact ${context.caregiverName} directly.`;
+        } else if (decision.reason === 'consent_missing_or_expired') {
+            alertStatus = 'Not shared: no active consent';
+            speech = `Thank you. I recorded the follow-up, but I did not share it because there is no active permission.`;
+        } else {
+            speech = `Thank you. I recorded that you feel ${followupStatus}. No caregiver alert was needed.`;
+        }
         return handlerInput.responseBuilder
-            .speak(`<speak>${escapeSsml(speakOutput)}</speak>`)
+            .speak(speech)
+            .withSimpleCard('Family Wellness Snapshot', `${memberName}\nFollow-up: completed\nStatus: ${followupStatus}\nCare Circle: ${alertStatus}`)
+            .getResponse();
+    }
+};
+
+const GetWellnessSummaryIntentHandler = {
+    canHandle(handlerInput) {
+        return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
+            && Alexa.getIntentName(handlerInput.requestEnvelope) === 'GetWellnessSummaryIntent';
+    },
+    async handle(handlerInput) {
+        const memberName = getSlotValue(handlerInput, 'memberName') || defaultMemberName();
+        const timeframe = getSlotValue(handlerInput, 'timeframe') || 'this week';
+        const snapshot = await getWellnessSnapshot({ ownerId: ownerId(handlerInput), memberName, timeframe });
+        const signalText = snapshot.signals.length ? snapshot.signals.join(', ') : 'no recent signals';
+        const speech = `${memberName}'s ${timeframe} summary: ${snapshot.status}. I found ${snapshot.eventCount} wellness reports covering ${signalText}. Follow-up: ${snapshot.followup}.`;
+        return handlerInput.responseBuilder
+            .speak(speech)
+            .withSimpleCard('Family Wellness Snapshot', `${memberName} · ${timeframe}\nStatus: ${snapshot.status}\nSignals: ${signalText}\nFollow-up: ${snapshot.followup}`)
+            .getResponse();
+    }
+};
+
+const YesIntentHandler = {
+    canHandle(handlerInput) {
+        return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
+            && Alexa.getIntentName(handlerInput.requestEnvelope) === 'AMAZON.YesIntent';
+    },
+    async handle(handlerInput) {
+        const attributes = sessionAttributes(handlerInput);
+        if (attributes.conversationState === STATES.AWAITING_FOLLOWUP_CONFIRMATION) {
+            const followup = await ensureFollowup(handlerInput, {
+                memberName: attributes.memberName,
+                signal: attributes.signal
+            });
+            const context = await getCareContext({ ownerId: ownerId(handlerInput), memberName: attributes.memberName });
+            saveConversationState(handlerInput, {
+                conversationState: STATES.AWAITING_CONSENT_CONFIRMATION,
+                caregiverName: context.caregiverName,
+                followupId: followup.followupId
+            });
+            const prompt = `The follow-up is scheduled for six. Do you authorize ${context.caregiverName} to receive a brief alert only if you report ${attributes.signal.replace(/-/g, ' ')} again during that check-in?`;
+            return handlerInput.responseBuilder.speak(prompt).reprompt(prompt).getResponse();
+        }
+        if (attributes.conversationState === STATES.AWAITING_CONSENT_CONFIRMATION) {
+            await tracedTool('request_consent', {
+                ownerId: ownerId(handlerInput),
+                memberName: attributes.memberName,
+                caregiverName: attributes.caregiverName,
+                signal: attributes.signal,
+                followupId: attributes.followupId
+            });
+            return handlerInput.responseBuilder
+                .speak(`Done. Your permission applies only to this follow-up, and no other information will be shared with ${attributes.caregiverName}.`)
+                .withSimpleCard('CarePulse permission', `Shared with: ${attributes.caregiverName}\nOnly if: ${attributes.signal} repeats\nScope: this follow-up only`)
+                .getResponse();
+        }
+        return handlerInput.responseBuilder.speak('What would you like me to help with?').reprompt('How can I help?').getResponse();
+    }
+};
+
+const NoIntentHandler = {
+    canHandle(handlerInput) {
+        return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
+            && Alexa.getIntentName(handlerInput.requestEnvelope) === 'AMAZON.NoIntent';
+    },
+    handle(handlerInput) {
+        const state = sessionAttributes(handlerInput).conversationState;
+        if (state === STATES.AWAITING_FOLLOWUP_CONFIRMATION) {
+            return handlerInput.responseBuilder.speak('Okay. I recorded the wellness update without creating a follow-up.').getResponse();
+        }
+        if (state === STATES.AWAITING_CONSENT_CONFIRMATION) {
+            return handlerInput.responseBuilder.speak('Okay. The follow-up remains scheduled, but I will not share it with anyone.').getResponse();
+        }
+        return handlerInput.responseBuilder.speak('Okay.').getResponse();
+    }
+};
+
+const EmergencyGuidanceIntentHandler = {
+    canHandle(handlerInput) {
+        return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
+            && Alexa.getIntentName(handlerInput.requestEnvelope) === 'EmergencyGuidanceIntent';
+    },
+    handle(handlerInput) {
+        return handlerInput.responseBuilder
+            .speak('Care Pulse cannot handle emergencies. If someone may be in immediate danger, call your local emergency number now or ask a nearby person for help.')
             .getResponse();
     }
 };
@@ -254,24 +403,18 @@ const HelpIntentHandler = {
             && Alexa.getIntentName(handlerInput.requestEnvelope) === 'AMAZON.HelpIntent';
     },
     handle(handlerInput) {
-        const speakOutput = 'You can say, log Lía’s temperature as 38.8, check Dad’s health trends this week, or send a caregiver alert.';
-        return handlerInput.responseBuilder
-            .speak(speakOutput)
-            .reprompt('Would you like to log a vital sign, check health trends, or alert a caregiver?')
-            .getResponse();
+        const prompt = 'Try saying, I feel more tired than usual, schedule a check-in at six, or give me my weekly wellness summary.';
+        return handlerInput.responseBuilder.speak(prompt).reprompt(prompt).getResponse();
     }
 };
 
 const CancelAndStopIntentHandler = {
     canHandle(handlerInput) {
         return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
-            && (Alexa.getIntentName(handlerInput.requestEnvelope) === 'AMAZON.CancelIntent'
-                || Alexa.getIntentName(handlerInput.requestEnvelope) === 'AMAZON.StopIntent');
+            && ['AMAZON.CancelIntent', 'AMAZON.StopIntent'].includes(Alexa.getIntentName(handlerInput.requestEnvelope));
     },
     handle(handlerInput) {
-        return handlerInput.responseBuilder
-            .speak('<speak>Take care. I’m here if you need me.</speak>')
-            .getResponse();
+        return handlerInput.responseBuilder.speak('Take care.').getResponse();
     }
 };
 
@@ -281,11 +424,8 @@ const FallbackIntentHandler = {
             && Alexa.getIntentName(handlerInput.requestEnvelope) === 'AMAZON.FallbackIntent';
     },
     handle(handlerInput) {
-        const speakOutput = 'I can help log a vital sign, check health trends, or alert a caregiver. Which would you like?';
-        return handlerInput.responseBuilder
-            .speak(speakOutput)
-            .reprompt(speakOutput)
-            .getResponse();
+        const prompt = 'I can record a wellness signal, create a follow-up, or show a simple weekly summary. What would you like to do?';
+        return handlerInput.responseBuilder.speak(prompt).reprompt(prompt).getResponse();
     }
 };
 
@@ -303,21 +443,23 @@ const CatchAllExceptionHandler = {
         return true;
     },
     handle(handlerInput, error) {
-        console.error('Care Pulse request failed:', error);
-        const speakOutput = 'I am sorry, something went wrong. Please try again in a moment.';
-        return handlerInput.responseBuilder
-            .speak(speakOutput)
-            .reprompt(speakOutput)
-            .getResponse();
+        console.error('CarePulse request failed:', error);
+        const prompt = 'I am sorry, something went wrong. Please try again.';
+        return handlerInput.responseBuilder.speak(prompt).reprompt(prompt).getResponse();
     }
 };
 
 exports.handler = Alexa.SkillBuilders.custom()
     .addRequestHandlers(
         LaunchRequestHandler,
-        LogVitalIntentHandler,
-        CheckTrendsIntentHandler,
-        CaregiverAlertHandler,
+        ReportWellnessIntentHandler,
+        ScheduleFollowupIntentHandler,
+        ConfigureCaregiverAlertIntentHandler,
+        CompleteFollowupIntentHandler,
+        GetWellnessSummaryIntentHandler,
+        YesIntentHandler,
+        NoIntentHandler,
+        EmergencyGuidanceIntentHandler,
         HelpIntentHandler,
         CancelAndStopIntentHandler,
         FallbackIntentHandler,
@@ -325,3 +467,5 @@ exports.handler = Alexa.SkillBuilders.custom()
     )
     .addErrorHandlers(CatchAllExceptionHandler)
     .lambda();
+
+exports._private = { ownerId, localDateTime, followupSchedule, STATES };

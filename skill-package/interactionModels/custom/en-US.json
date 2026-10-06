@@ -4,144 +4,147 @@
       "invocationName": "care pulse",
       "intents": [
         {
-          "name": "LogVitalIntent",
+          "name": "ReportWellnessIntent",
           "slots": [
-            { "name": "vitalType", "type": "VITAL_TYPE" },
-            { "name": "value", "type": "AMAZON.SearchQuery" },
-            { "name": "memberName", "type": "AMAZON.Person" }
+            { "name": "memberName", "type": "AMAZON.Person" },
+            { "name": "wellnessSignal", "type": "WELLNESS_SIGNAL" },
+            { "name": "intensity", "type": "WELLNESS_INTENSITY" },
+            { "name": "sleepHours", "type": "AMAZON.NUMBER" }
           ],
           "samples": [
-            "log {vitalType} for {memberName} as {value}",
-            "record {vitalType} for {memberName} {value}",
-            "add {value} for {memberName} {vitalType}",
-            "{memberName} has a {vitalType} reading of {value}",
-            "save {vitalType} reading {value} for {memberName}",
-            "log my {vitalType} as {value}",
-            "record my {vitalType} {value}"
+            "I feel {intensity} {wellnessSignal}",
+            "I have been feeling {wellnessSignal}",
+            "I am feeling {wellnessSignal}",
+            "record that I feel {wellnessSignal}",
+            "record {wellnessSignal} for {memberName}",
+            "{memberName} has been feeling {wellnessSignal}",
+            "{memberName} feels {intensity} {wellnessSignal}",
+            "I only slept {sleepHours} hours",
+            "record {sleepHours} hours of sleep for {memberName}",
+            "log {sleepHours} hours of sleep"
           ]
         },
         {
-          "name": "CheckTrendsIntent",
+          "name": "ScheduleFollowupIntent",
+          "slots": [
+            { "name": "memberName", "type": "AMAZON.Person" },
+            { "name": "wellnessSignal", "type": "WELLNESS_SIGNAL" },
+            { "name": "followupTime", "type": "AMAZON.TIME" }
+          ],
+          "samples": [
+            "check on me again at {followupTime}",
+            "follow up with me at {followupTime}",
+            "schedule a check in at {followupTime}",
+            "check on {memberName} at {followupTime}",
+            "follow up about {wellnessSignal} at {followupTime}",
+            "schedule a {wellnessSignal} check in",
+            "schedule a follow up"
+          ]
+        },
+        {
+          "name": "ConfigureCaregiverAlertIntent",
+          "slots": [
+            { "name": "memberName", "type": "AMAZON.Person" },
+            { "name": "caregiverName", "type": "AMAZON.Person" },
+            { "name": "wellnessSignal", "type": "WELLNESS_SIGNAL" }
+          ],
+          "samples": [
+            "yes and if I still feel {wellnessSignal} tell {caregiverName}",
+            "yes and if I feel the same let {caregiverName} know",
+            "if I still feel {wellnessSignal} tell {caregiverName}",
+            "if I feel the same let {caregiverName} know",
+            "notify {caregiverName} if the {wellnessSignal} continues",
+            "tell {caregiverName} if {memberName} still feels {wellnessSignal}",
+            "alert my caregiver if I still feel the same",
+            "let my caregiver know if it happens again"
+          ]
+        },
+        {
+          "name": "CompleteFollowupIntent",
+          "slots": [
+            { "name": "memberName", "type": "AMAZON.Person" },
+            { "name": "followupStatus", "type": "FOLLOWUP_STATUS" }
+          ],
+          "samples": [
+            "I feel {followupStatus}",
+            "I am {followupStatus}",
+            "I still feel the same",
+            "I am feeling better now",
+            "I feel worse",
+            "{memberName} feels {followupStatus}",
+            "complete my check in as {followupStatus}"
+          ]
+        },
+        {
+          "name": "GetWellnessSummaryIntent",
           "slots": [
             { "name": "memberName", "type": "AMAZON.Person" },
             { "name": "timeframe", "type": "TIMEFRAME" }
           ],
           "samples": [
-            "check health trends for {memberName} {timeframe}",
+            "give me my wellness summary",
+            "show my {timeframe} summary",
+            "how have I been feeling {timeframe}",
             "how has {memberName} been doing {timeframe}",
-            "summarize {memberName} health this week",
-            "show me health trends for {memberName}",
-            "how is {memberName} doing today",
-            "check my health trends {timeframe}",
-            "summarize my health history"
+            "show the wellness snapshot for {memberName}",
+            "summarize {memberName} for {timeframe}",
+            "what changed this week"
           ]
         },
         {
-          "name": "TriggerAlertIntent",
-          "slots": [
-            { "name": "memberName", "type": "AMAZON.Person" }
-          ],
+          "name": "EmergencyGuidanceIntent",
+          "slots": [],
           "samples": [
-            "alert my caregiver for {memberName}",
-            "send a caregiver alert for {memberName}",
-            "ask someone to check on {memberName}",
-            "get help for {memberName}",
-            "send an emergency alert for {memberName}",
-            "alert my caregiver",
-            "send a caregiver alert"
+            "this is an emergency",
+            "I cannot breathe",
+            "someone cannot breathe",
+            "I have chest pain",
+            "someone is in immediate danger",
+            "I need emergency help"
           ]
         },
-        {
-          "name": "AMAZON.CancelIntent",
-          "samples": []
-        },
-        {
-          "name": "AMAZON.HelpIntent",
-          "samples": []
-        },
-        {
-          "name": "AMAZON.StopIntent",
-          "samples": []
-        },
-        {
-          "name": "AMAZON.NavigateHomeIntent",
-          "samples": []
-        },
-        {
-          "name": "AMAZON.FallbackIntent",
-          "samples": []
-        }
+        { "name": "AMAZON.YesIntent", "samples": [] },
+        { "name": "AMAZON.NoIntent", "samples": [] },
+        { "name": "AMAZON.CancelIntent", "samples": [] },
+        { "name": "AMAZON.HelpIntent", "samples": [] },
+        { "name": "AMAZON.StopIntent", "samples": [] },
+        { "name": "AMAZON.NavigateHomeIntent", "samples": [] },
+        { "name": "AMAZON.FallbackIntent", "samples": [] }
       ],
       "types": [
         {
-          "name": "VITAL_TYPE",
+          "name": "WELLNESS_SIGNAL",
           "values": [
-            {
-              "name": {
-                "value": "blood pressure",
-                "synonyms": [
-                  "blood pressure reading",
-                  "bp"
-                ]
-              }
-            },
-            {
-              "name": {
-                "value": "temperature",
-                "synonyms": [
-                  "body temperature"
-                ]
-              }
-            },
-            {
-              "name": {
-                "value": "heart rate",
-                "synonyms": [
-                  "pulse",
-                  "heart rate reading"
-                ]
-              }
-            },
-            {
-              "name": {
-                "value": "sleep",
-                "synonyms": [
-                  "sleep duration",
-                  "hours of sleep"
-                ]
-              }
-            }
+            { "name": { "value": "tiredness", "synonyms": ["tired", "fatigue", "exhausted", "low energy"] } },
+            { "name": { "value": "sleep", "synonyms": ["sleeping", "hours of sleep", "poor sleep"] } },
+            { "name": { "value": "mood", "synonyms": ["sad", "down", "low mood"] } },
+            { "name": { "value": "appetite", "synonyms": ["not hungry", "poor appetite", "hunger"] } },
+            { "name": { "value": "dizziness", "synonyms": ["dizzy", "lightheaded"] } },
+            { "name": { "value": "discomfort", "synonyms": ["uncomfortable", "not feeling well"] } }
+          ]
+        },
+        {
+          "name": "WELLNESS_INTENSITY",
+          "values": [
+            { "name": { "value": "more than usual", "synonyms": ["very", "really", "much more", "unusually"] } },
+            { "name": { "value": "a little", "synonyms": ["slightly", "somewhat", "a bit"] } },
+            { "name": { "value": "about the same", "synonyms": ["the same", "unchanged"] } }
+          ]
+        },
+        {
+          "name": "FOLLOWUP_STATUS",
+          "values": [
+            { "name": { "value": "better", "synonyms": ["much better", "improved", "fine now"] } },
+            { "name": { "value": "same", "synonyms": ["the same", "still tired", "unchanged", "no better"] } },
+            { "name": { "value": "worse", "synonyms": ["much worse", "not good", "worsened"] } }
           ]
         },
         {
           "name": "TIMEFRAME",
           "values": [
-            {
-              "name": {
-                "value": "today",
-                "synonyms": [
-                  "this day"
-                ]
-              }
-            },
-            {
-              "name": {
-                "value": "this week",
-                "synonyms": [
-                  "the past week",
-                  "last seven days"
-                ]
-              }
-            },
-            {
-              "name": {
-                "value": "this month",
-                "synonyms": [
-                  "the past month",
-                  "last thirty days"
-                ]
-              }
-            }
+            { "name": { "value": "today", "synonyms": ["this day"] } },
+            { "name": { "value": "this week", "synonyms": ["the past week", "last seven days"] } },
+            { "name": { "value": "this month", "synonyms": ["the past month", "last thirty days"] } }
           ]
         }
       ]

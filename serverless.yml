@@ -1,0 +1,152 @@
+service: carepulse-mvp
+frameworkVersion: '4'
+configValidationMode: error
+
+provider:
+  name: aws
+  runtime: nodejs22.x
+  architecture: arm64
+  region: ${opt:region, 'us-east-1'}
+  stage: ${opt:stage, 'dev'}
+  memorySize: 512
+  timeout: 15
+  logRetentionInDays: 14
+  deploymentMethod: direct
+  versionFunctions: false
+  environment:
+    CARE_TABLE_NAME:
+      Ref: CarePulseTable
+    SNS_TOPIC_ARN:
+      Ref: CaregiverAlertsTopic
+    BEDROCK_MODEL_ID: ${param:bedrockModelId}
+    REQUIRE_BEDROCK: 'true'
+    DEFAULT_MEMBER_NAME: ${param:defaultMemberName, 'Elena'}
+    DEFAULT_CAREGIVER_NAME: ${param:defaultCaregiverName, 'Laura'}
+    DEFAULT_BASELINE_SLEEP_HOURS: ${param:baselineSleepHours, '8.0'}
+    DEFAULT_TIME_ZONE: ${param:timeZone, 'America/Mexico_City'}
+    DEMO_OWNER_ID: ${param:demoOwnerId, ''}
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:Query
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+          Resource:
+            - Fn::GetAtt: [CarePulseTable, Arn]
+        - Effect: Allow
+          Action:
+            - sns:Publish
+          Resource:
+            Ref: CaregiverAlertsTopic
+        - Effect: Allow
+          Action:
+            - bedrock:InvokeModel
+            - bedrock:InvokeModelWithResponseStream
+          Resource: '*'
+  tags:
+    Project: CarePulse
+    Component: AlexaMVP
+  stackTags:
+    Project: CarePulse
+    ManagedBy: ServerlessFramework
+
+package:
+  individually: true
+  patterns:
+    - '!**'
+
+functions:
+  alexaSkill:
+    name: carepulse-${sls:stage}-alexa-skill
+    description: CarePulse voice-first family wellness orchestration MVP
+    handler: lambda/index.handler
+    package:
+      patterns:
+        - lambda/**
+        - '!lambda/test/**'
+        - '!lambda/seed_demo.js'
+    events:
+      - alexaSkill:
+          appId: ${param:alexaSkillId}
+          enabled: true
+
+  mcpGateway:
+    name: carepulse-${sls:stage}-mcp-gateway
+    description: CarePulse MCP 2025-11-25 JSON Streamable HTTP gateway
+    handler: lambda/mcp_http.handler
+    environment:
+      MCP_API_KEY: ${param:mcpApiKey}
+    package:
+      patterns:
+        - lambda/**
+        - '!lambda/test/**'
+        - '!lambda/seed_demo.js'
+    events:
+      - httpApi:
+          path: /mcp
+          method: POST
+      - httpApi:
+          path: /mcp
+          method: DELETE
+
+resources:
+  Resources:
+    CarePulseTable:
+      Type: AWS::DynamoDB::Table
+      DeletionPolicy: Retain
+      UpdateReplacePolicy: Retain
+      Properties:
+        TableName: carepulse-${sls:stage}-care-state
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: pk
+            AttributeType: S
+          - AttributeName: sk
+            AttributeType: S
+        KeySchema:
+          - AttributeName: pk
+            KeyType: HASH
+          - AttributeName: sk
+            KeyType: RANGE
+        PointInTimeRecoverySpecification:
+          PointInTimeRecoveryEnabled: true
+        SSESpecification:
+          SSEEnabled: true
+        TimeToLiveSpecification:
+          AttributeName: expiresAt
+          Enabled: true
+        Tags:
+          - Key: DataClassification
+            Value: SensitiveWellnessData
+
+    CaregiverAlertsTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: carepulse-${sls:stage}-caregiver-alerts
+        DisplayName: CarePulse check-ins
+        KmsMasterKeyId: alias/aws/sns
+
+  Outputs:
+    AlexaLambdaArn:
+      Description: Paste this ARN into the Alexa custom skill endpoint configuration.
+      Value:
+        Fn::GetAtt: [AlexaSkillLambdaFunction, Arn]
+    McpEndpoint:
+      Description: MCP 2025-11-25 Streamable HTTP JSON endpoint.
+      Value:
+        Fn::Join:
+          - ''
+          - - Fn::GetAtt: [HttpApi, ApiEndpoint]
+            - /mcp
+    CarePulseTableName:
+      Description: DynamoDB table containing care context, events, follow-ups, and consent records.
+      Value:
+        Ref: CarePulseTable
+    CaregiverAlertsTopicArn:
+      Description: Subscribe the authorized demo caregiver to this topic with AWS CLI.
+      Value:
+        Ref: CaregiverAlertsTopic
