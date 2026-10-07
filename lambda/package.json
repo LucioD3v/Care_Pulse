@@ -4,7 +4,8 @@
     "description": "Proactive family health assistant for Alexa",
     "main": "index.js",
     "scripts": {
-      "test": "node --test"
+      "test": "node --test",
+      "seed:demo": "node seed_demo.js"
     },
     "author": "Amazon Alexa",
     "license": "ISC",

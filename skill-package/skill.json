@@ -3,19 +3,19 @@
     "publishingInformation": {
       "locales": {
         "en-US": {
-          "summary": "Sample Short Description",
+          "summary": "Coordinate family wellness follow-ups with context and consent.",
           "examplePhrases": [
-            "Alexa open hello world",
-            "hello",
-            "help"
+            "Alexa, open Care Pulse",
+            "I feel more tired than usual",
+            "give me my wellness summary"
           ],
           "name": "Care Pulse",
-          "description": "Sample Full Description"
+          "description": "CarePulse helps a family record everyday wellness signals, notice changes from an established routine, schedule follow-ups, and notify an authorized caregiver when a configured condition repeats. CarePulse does not diagnose or replace professional or emergency care."
         }
       },
       "isAvailableWorldwide": true,
-      "testingInstructions": "Sample Testing Instructions.",
-      "category": "KNOWLEDGE_AND_TRIVIA",
+      "testingInstructions": "Use the en-US model. Say: I feel more tired than usual. Accept the follow-up and scoped caregiver consent. Then say: I still feel the same. Verify the Family Wellness Snapshot card and the authorized SNS notification.",
+      "category": "HEALTH_AND_FITNESS",
       "distributionCountries": []
     },
     "apis": {

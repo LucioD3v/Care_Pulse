@@ -4,22 +4,20 @@ const { SNSClient, PublishCommand } = require('@aws-sdk/client-sns');
 
 const snsClient = new SNSClient({ region: process.env.AWS_REGION || 'us-east-1' });
 
-function formatAlert({ memberName, metric, value, unit, message }) {
-    const reading = metric && value !== undefined
-        ? `${metric} is ${value}${unit ? ` ${unit}` : ''}`
-        : message || 'a caregiver check-in was requested';
+function formatAlert({ memberName, caregiverName, signal, followupStatus, consentId }) {
+    const readableSignal = String(signal || 'wellness concern').replace(/-/g, ' ');
     return {
-        subject: `CarePulse alert for ${memberName}`,
-        message: `Caregiver Alert: ${memberName}'s ${reading}. ${message || 'Please check in as soon as possible.'}`,
+        subject: `CarePulse check-in for ${memberName}`,
+        message: `CarePulse: ${memberName} reported ${readableSignal} again during today's follow-up. Please check in with them. No other wellness data was shared.`,
         payload: {
             source: 'CarePulse MCP',
             memberName,
-            metric: metric || null,
-            value: value ?? null,
-            unit: unit || null,
-            message: message || null,
+            caregiverName: caregiverName || null,
+            signal: signal || null,
+            followupStatus: followupStatus || null,
+            consentId,
             createdAt: new Date().toISOString(),
-            urgency: 'high'
+            urgency: 'normal'
         }
     };
 }
@@ -39,7 +37,7 @@ async function sendCaregiverAlert(alert) {
             Message: formatted.message,
             MessageAttributes: {
                 memberName: { DataType: 'String', StringValue: String(alert.memberName) },
-                urgency: { DataType: 'String', StringValue: 'high' },
+                urgency: { DataType: 'String', StringValue: 'normal' },
                 source: { DataType: 'String', StringValue: 'CarePulse MCP' }
             }
         }));
