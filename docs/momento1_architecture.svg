@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title description">
+  <title id="title">Moment 1: wellness report, baseline comparison, and scoped consent</title>
+  <desc id="description">Alexa records a wellness signal, the Lambda loads care context and history, compares deterministically with baseline, and asks sequentially for follow-up and consent. Bedrock only renders voice copy. Emergency guidance currently routes to local emergency services without an SNS override.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#455564"/></marker>
+    <style>
+      .bg{fill:#f5f7f8}.title{font:700 27px sans-serif;fill:#14212b}.subtitle{font:15px sans-serif;fill:#4a5c68}.node{fill:#fff;stroke:#9aacb5;stroke-width:2;rx:12}.aws{fill:#eef7f7;stroke:#16847f}.bedrock{fill:#fff4e9;stroke:#c47719}.warn{fill:#fff1ef;stroke:#c24b3d}.future{fill:#fff;stroke:#c24b3d;stroke-dasharray:8 6}.label{font:700 16px sans-serif;fill:#14212b}.small{font:14px sans-serif;fill:#30434f}.tiny{font:12px sans-serif;fill:#52636d}.arrow{fill:none;stroke:#455564;stroke-width:2.5;marker-end:url(#arrow)}.dash{fill:none;stroke:#c24b3d;stroke-width:2.5;stroke-dasharray:8 6;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect class="bg" width="1200" height="720"/>
+  <text class="title" x="40" y="50">MOMENT 1 · Report, baseline, and consent</text>
+  <text class="subtitle" x="40" y="78">Consent is explicit and scoped to one follow-up. Bedrock does not decide whether data is shared.</text>
+
+  <rect class="node" x="40" y="140" width="190" height="112"/>
+  <text class="label" x="60" y="176">1 · Alexa voice</text>
+  <text class="small" x="60" y="204">"I feel more tired</text><text class="small" x="60" y="225">than usual."</text>
+
+  <rect class="aws" x="280" y="140" width="205" height="112"/>
+  <text class="label" x="300" y="176">2 · ASK Lambda</text>
+  <text class="small" x="300" y="204">ReportWellnessIntent</text><text class="small" x="300" y="225">owner-scoped request</text>
+
+  <rect class="aws" x="535" y="140" width="230" height="112"/>
+  <text class="label" x="555" y="176">3 · Shared MCP tools</text>
+  <text class="small" x="555" y="204">In-process: load context,</text><text class="small" x="555" y="225">log event, read routine</text>
+
+  <rect class="aws" x="815" y="140" width="205" height="112"/>
+  <text class="label" x="835" y="176">4 · Compare</text>
+  <text class="small" x="835" y="204">Deterministic baseline</text><text class="small" x="835" y="225">comparison; no diagnosis</text>
+
+  <path class="arrow" d="M230 196H272"/><path class="arrow" d="M485 196H527"/><path class="arrow" d="M765 196H807"/>
+
+  <rect class="bedrock" x="815" y="310" width="205" height="100"/>
+  <text class="label" x="835" y="348">5 · Amazon Bedrock</text>
+  <text class="small" x="835" y="375">Renders a short voice</text><text class="small" x="835" y="396">observation from facts</text>
+  <path class="arrow" d="M918 252V302"/>
+
+  <rect class="node" x="535" y="310" width="230" height="100"/>
+  <text class="label" x="555" y="348">6 · Ask to follow up</text>
+  <text class="small" x="555" y="375">On Yes: create_followup</text><text class="small" x="555" y="396">then ask scoped consent</text>
+  <path class="arrow" d="M815 360H773"/>
+
+  <rect class="aws" x="280" y="310" width="205" height="100"/>
+  <text class="label" x="300" y="348">7 · Ask consent</text>
+  <text class="small" x="300" y="375">Named caregiver +</text><text class="small" x="300" y="396">signal + one follow-up</text>
+  <path class="arrow" d="M535 360H493"/>
+
+  <rect class="aws" x="40" y="310" width="190" height="100"/>
+  <text class="label" x="60" y="348">8 · Persist on Yes</text>
+  <text class="small" x="60" y="375">Scoped consent stored</text><text class="small" x="60" y="396">with expiresAt</text>
+  <path class="arrow" d="M280 360H238"/>
+
+  <rect class="warn" x="40" y="500" width="335" height="130"/>
+  <text class="label" x="60" y="538">Emergency utterance</text>
+  <text class="small" x="60" y="566">EmergencyGuidanceIntent tells the user</text>
+  <text class="small" x="60" y="588">to call local emergency services.</text>
+  <text class="tiny" x="60" y="612">No automatic SNS override is implemented.</text>
+
+  <rect class="future" x="430" y="500" width="335" height="130"/>
+  <text class="label" x="450" y="538">Planned safety extension</text>
+  <text class="small" x="450" y="566">trigger_emergency_alert with explicit</text>
+  <text class="small" x="450" y="588">policy, testing, and governance.</text>
+  <text class="tiny" x="450" y="612">Not part of the current MCP tool list.</text>
+  <path class="dash" d="M375 565H422"/>
+
+  <rect class="bedrock" x="815" y="500" width="330" height="130"/>
+  <text class="label" x="835" y="538">Privacy implementation note</text>
+  <text class="small" x="835" y="566">Consent currently defaults to 36 h;</text>
+  <text class="small" x="835" y="588">24 h is the target, not current behavior.</text>
+  <text class="tiny" x="835" y="612">App checks expiry; DynamoDB TTL is async.</text>
+</svg>

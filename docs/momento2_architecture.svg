@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title description">
+  <title id="title">Moment 2: due follow-up and consent-gated caregiver action</title>
+  <desc id="description">A follow-up stored for 6 PM is checked on the member's next Alexa skill launch after it is due. Better ends without an alert. Same or worse is checked against an active scoped consent before Amazon SNS is called.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#455564"/></marker>
+    <style>
+      .bg{fill:#f5f7f8}.title{font:700 27px sans-serif;fill:#14212b}.subtitle{font:15px sans-serif;fill:#4a5c68}.node{fill:#fff;stroke:#9aacb5;stroke-width:2;rx:12}.aws{fill:#eef7f7;stroke:#16847f}.sns{fill:#fff4e9;stroke:#c47719}.warn{fill:#fff1ef;stroke:#c24b3d}.label{font:700 16px sans-serif;fill:#14212b}.small{font:14px sans-serif;fill:#30434f}.tiny{font:12px sans-serif;fill:#52636d}.arrow{fill:none;stroke:#455564;stroke-width:2.5;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect class="bg" width="1200" height="720"/>
+  <text class="title" x="40" y="50">MOMENT 2 · Due follow-up and caregiver policy</text>
+  <text class="subtitle" x="40" y="78">The stored due time defaults to 6:00 PM; Alexa checks it on the member's next skill launch.</text>
+
+  <rect class="aws" x="40" y="145" width="210" height="112"/>
+  <text class="label" x="60" y="181">6:00 PM due</text>
+  <text class="small" x="60" y="209">Follow-up record becomes</text><text class="small" x="60" y="230">eligible by local time</text>
+
+  <rect class="warn" x="310" y="145" width="225" height="112"/>
+  <text class="label" x="330" y="181">Member opens skill</text>
+  <text class="small" x="330" y="209">LaunchRequest checks due</text><text class="small" x="330" y="230">follow-ups in DynamoDB</text>
+
+  <rect class="node" x="595" y="145" width="250" height="112"/>
+  <text class="label" x="615" y="181">Alexa asks</text>
+  <text class="small" x="615" y="209">"Do you feel better,</text><text class="small" x="615" y="230">the same, or worse?"</text>
+
+  <rect class="aws" x="910" y="145" width="250" height="112"/>
+  <text class="label" x="930" y="181">Record answer</text>
+  <text class="small" x="930" y="209">log_wellness_event +</text><text class="small" x="930" y="230">complete follow-up</text>
+
+  <path class="arrow" d="M250 201H302"/><path class="arrow" d="M535 201H587"/><path class="arrow" d="M845 201H902"/>
+
+  <path class="arrow" d="M1035 257V285H610V302"/>
+  <path d="M610 300L715 350L610 400L505 350Z" fill="#fff" stroke="#9aacb5" stroke-width="2"/>
+  <text class="label" x="580" y="345">Status?</text>
+  <text class="tiny" x="567" y="366">better / same / worse</text>
+
+  <rect class="node" x="80" y="445" width="320" height="100"/>
+  <text class="label" x="100" y="482">Better</text>
+  <text class="small" x="100" y="510">Record and close without an alert.</text>
+  <text class="tiny" x="100" y="531">Current response copy is generic.</text>
+
+  <rect class="aws" x="450" y="445" width="300" height="100"/>
+  <text class="label" x="470" y="482">Same or worse</text>
+  <text class="small" x="470" y="510">Evaluate scoped consent and expiry.</text>
+
+  <path d="M930 435L1035 495L930 555L825 495Z" fill="#eef7f7" stroke="#16847f" stroke-width="2"/>
+  <text class="label" x="858" y="490">Consent active</text>
+  <text class="small" x="887" y="514">and in scope?</text>
+
+  <path class="arrow" d="M505 350H240V437"/>
+  <path class="arrow" d="M610 400V437"/>
+  <path class="arrow" d="M750 495H817"/>
+  <text class="tiny" x="324" y="339">better</text>
+  <text class="tiny" x="620" y="424">same / worse</text>
+
+  <rect class="warn" x="450" y="590" width="300" height="90"/>
+  <text class="label" x="470" y="626">No active consent</text>
+  <text class="small" x="470" y="654">Record the check-in; do not share.</text>
+
+  <rect class="sns" x="850" y="590" width="300" height="90"/>
+  <text class="label" x="870" y="626">Amazon SNS</text>
+  <text class="small" x="870" y="654">Send only the authorized summary.</text>
+
+  <path class="arrow" d="M930 555V582"/>
+  <path class="arrow" d="M825 495H790V635H758"/>
+  <text class="tiny" x="940" y="575">yes</text>
+  <text class="tiny" x="770" y="620">no</text>
+
+  <rect class="node" x="40" y="590" width="360" height="90"/>
+  <text class="label" x="60" y="626">TTL behavior</text>
+  <text class="small" x="60" y="654">Current consent: 36 h; 24 h target.</text>
+  <text class="tiny" x="60" y="674">DynamoDB TTL purge is asynchronous.</text>
+</svg>
