@@ -1,14 +1,17 @@
 {
     "name": "carepulse-mcp",
     "version": "1.0.0",
-    "description": "Proactive family health assistant for Alexa",
+    "description": "Consent-gated family wellness follow-ups for Alexa",
     "main": "index.js",
     "scripts": {
-      "test": "node --test",
+      "test": "node --test test/care_pulse.test.js",
       "seed:demo": "node seed_demo.js"
     },
-    "author": "Amazon Alexa",
-    "license": "ISC",
+    "author": "CarePulse team",
+    "license": "Apache-2.0",
+    "engines": {
+      "node": ">=22"
+    },
     "dependencies": {
       "ask-sdk-core": "^2.14.0",
       "ask-sdk-model": "^1.79.0",

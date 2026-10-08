@@ -92,6 +92,22 @@
           ]
         },
         {
+          "name": "SetCarePreferencesIntent",
+          "slots": [
+            { "name": "summaryLength", "type": "SUMMARY_LENGTH" },
+            { "name": "preferredFollowupTime", "type": "AMAZON.TIME" },
+            { "name": "followupOffers", "type": "FOLLOWUP_OFFERS" }
+          ],
+          "samples": [
+            "use {summaryLength} summaries",
+            "set my summary length to {summaryLength}",
+            "set my follow up time to {preferredFollowupTime}",
+            "make {preferredFollowupTime} my usual check in time",
+            "turn {followupOffers} follow up suggestions",
+            "set follow up suggestions to {followupOffers}"
+          ]
+        },
+        {
           "name": "EmergencyGuidanceIntent",
           "slots": [],
           "samples": [
@@ -145,6 +161,20 @@
             { "name": { "value": "today", "synonyms": ["this day"] } },
             { "name": { "value": "this week", "synonyms": ["the past week", "last seven days"] } },
             { "name": { "value": "this month", "synonyms": ["the past month", "last thirty days"] } }
+          ]
+        },
+        {
+          "name": "SUMMARY_LENGTH",
+          "values": [
+            { "name": { "value": "short", "synonyms": ["brief", "concise"] } },
+            { "name": { "value": "detailed", "synonyms": ["long", "more detail"] } }
+          ]
+        },
+        {
+          "name": "FOLLOWUP_OFFERS",
+          "values": [
+            { "name": { "value": "on", "synonyms": ["enabled"] } },
+            { "name": { "value": "off", "synonyms": ["disabled"] } }
           ]
         }
       ]

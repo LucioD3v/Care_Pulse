@@ -6,7 +6,7 @@ const path = require('node:path');
 const { beforeEach, test } = require('node:test');
 const { handler } = require('../index');
 const { handler: mcpHttpHandler } = require('../mcp_http');
-const mcp = require('../mcp_client');
+const mcp = require('../care_service');
 const { renderVoiceObservation } = require('../voice_agent');
 
 beforeEach(() => {
@@ -19,7 +19,7 @@ beforeEach(() => {
     mcp.resetMockRecords();
 });
 
-function alexaRequest({ intentName, slots = {}, attributes = {}, userId = 'test-user', type = 'IntentRequest' }) {
+function alexaRequest({ intentName, slots = {}, attributes = {}, userId = 'test-user', type = 'IntentRequest', supportedInterfaces = {} }) {
     const request = type === 'LaunchRequest'
         ? { type, requestId: `request-${Date.now()}`, timestamp: new Date().toISOString(), locale: 'en-US' }
         : {
@@ -42,7 +42,7 @@ function alexaRequest({ intentName, slots = {}, attributes = {}, userId = 'test-
             System: {
                 application: { applicationId: 'test' },
                 user: { userId },
-                device: { deviceId: 'test-device', supportedInterfaces: {} }
+                device: { deviceId: 'test-device', supportedInterfaces }
             }
         },
         request
@@ -70,6 +70,7 @@ test('interaction model exposes the MVP intents and required slots', () => {
     assert.ok(intents.has('ConfigureCaregiverAlertIntent'));
     assert.ok(intents.has('CompleteFollowupIntent'));
     assert.ok(intents.has('GetWellnessSummaryIntent'));
+    assert.ok(intents.has('SetCarePreferencesIntent'));
     assert.ok(intents.has('EmergencyGuidanceIntent'));
     assert.ok(intents.has('AMAZON.YesIntent'));
     assert.ok(intents.has('AMAZON.NoIntent'));
@@ -168,7 +169,7 @@ test('happy path records wellness, schedules follow-up, stores consent, and prep
             intensity: slot('intensity', 'more than usual')
         }
     }));
-    assert.match(report.response.outputSpeech.ssml, /check in again at six/i);
+    assert.match(report.response.outputSpeech.ssml, /check in again at 6 PM/i);
 
     const schedule = await invokeAlexa(alexaRequest({
         userId,
@@ -219,4 +220,104 @@ test('emergency language never presents CarePulse as emergency assistance', asyn
     const response = await invokeAlexa(alexaRequest({ intentName: 'EmergencyGuidanceIntent' }));
     assert.match(response.response.outputSpeech.ssml, /cannot handle emergencies/i);
     assert.match(response.response.outputSpeech.ssml, /local emergency number/i);
+});
+
+test('preferences change summary detail, default time, and follow-up offers', async () => {
+    const userId = `preferences-${Date.now()}`;
+    const request = alexaRequest({
+        userId,
+        intentName: 'SetCarePreferencesIntent',
+        slots: {
+            summaryLength: slot('summaryLength', 'detailed'),
+            preferredFollowupTime: slot('preferredFollowupTime', '20:00'),
+            followupOffers: slot('followupOffers', 'off')
+        }
+    });
+    const saved = await invokeAlexa(request);
+    assert.match(saved.response.outputSpeech.ssml, /detailed summaries/);
+    const ownerId = require('../index')._private.ownerId({ requestEnvelope: request });
+    const context = await mcp.getCareContext({ ownerId, memberName: 'Elena' });
+    assert.equal(context.preferredFollowupTime, '20:00');
+    assert.equal(context.followupOffers, 'off');
+
+    const quietReport = await invokeAlexa(alexaRequest({
+        userId,
+        intentName: 'ReportWellnessIntent',
+        slots: { wellnessSignal: slot('wellnessSignal', 'tiredness') }
+    }));
+    assert.doesNotMatch(quietReport.response.outputSpeech.ssml, /Would you like/);
+
+    const detailed = await invokeAlexa(alexaRequest({ userId, intentName: 'GetWellnessSummaryIntent' }));
+    assert.match(detailed.response.outputSpeech.ssml, /covering tiredness/);
+
+    await invokeAlexa(alexaRequest({
+        userId,
+        intentName: 'SetCarePreferencesIntent',
+        slots: { followupOffers: slot('followupOffers', 'on') }
+    }));
+    const offeredReport = await invokeAlexa(alexaRequest({
+        userId,
+        intentName: 'ReportWellnessIntent',
+        slots: { wellnessSignal: slot('wellnessSignal', 'tiredness') }
+    }));
+    assert.match(offeredReport.response.outputSpeech.ssml, /check in again at 8 PM/i);
+    await invokeAlexa(alexaRequest({
+        userId,
+        intentName: 'AMAZON.YesIntent',
+        attributes: offeredReport.sessionAttributes
+    }));
+    const pending = await mcp.getPendingFollowup({ ownerId, memberName: 'Elena' });
+    assert.equal(pending.dueTime, '20:00');
+});
+
+test('unsupported preference values prompt for correction without saving', async () => {
+    const userId = `invalid-preference-${Date.now()}`;
+    const invalid = await invokeAlexa(alexaRequest({
+        userId,
+        intentName: 'SetCarePreferencesIntent',
+        slots: { summaryLength: slot('summaryLength', 'verbose') }
+    }));
+    assert.match(invalid.response.outputSpeech.ssml, /choose short or detailed/i);
+    const request = alexaRequest({ userId, intentName: 'GetWellnessSummaryIntent' });
+    const ownerId = require('../index')._private.ownerId({ requestEnvelope: request });
+    const context = await mcp.getCareContext({ ownerId, memberName: 'Elena' });
+    assert.equal(context.summaryLength, 'short');
+});
+
+test('dashboard is sent only when APL is supported and voice remains available', async () => {
+    const manifestPath = path.join(__dirname, '..', '..', 'skill-package', 'skill.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')).manifest;
+    assert.ok(manifest.apis.custom.interfaces.some(item => item.type === 'ALEXA_PRESENTATION_APL'));
+    const userId = `dashboard-${Date.now()}`;
+    const screen = await invokeAlexa(alexaRequest({
+        userId,
+        intentName: 'GetWellnessSummaryIntent',
+        supportedInterfaces: { 'Alexa.Presentation.APL': {} }
+    }));
+    const dashboard = screen.response.directives.find(item => item.type === 'Alexa.Presentation.APL.RenderDocument');
+    assert.ok(dashboard);
+    assert.equal(dashboard.datasources.careData.lastReport, 'No recent report');
+    assert.equal(dashboard.datasources.careData.nextFollowup, 'None scheduled');
+    assert.match(screen.response.outputSpeech.ssml, /summary/);
+
+    const voiceOnly = await invokeAlexa(alexaRequest({ userId, intentName: 'GetWellnessSummaryIntent' }));
+    assert.equal(voiceOnly.response.directives?.length || 0, 0);
+    assert.match(voiceOnly.response.outputSpeech.ssml, /summary/);
+});
+
+test('member and report text cannot inject spoken SSML or APL markup', async () => {
+    const request = alexaRequest({
+        userId: `markup-${Date.now()}`,
+        intentName: 'GetWellnessSummaryIntent',
+        slots: { memberName: slot('memberName', 'E <break/>') },
+        supportedInterfaces: { 'Alexa.Presentation.APL': {} }
+    });
+    const ownerId = require('../index')._private.ownerId({ requestEnvelope: request });
+    await mcp.logWellnessEvent({ ownerId, memberName: 'E <break/>', signal: 'bad<blink>', state: 'reported' });
+    const result = await invokeAlexa(request);
+    assert.match(result.response.outputSpeech.ssml, /E &lt;break\/&gt;/);
+    assert.doesNotMatch(result.response.outputSpeech.ssml, /<break\/>/);
+    const dashboard = result.response.directives.find(item => item.type === 'Alexa.Presentation.APL.RenderDocument');
+    assert.match(dashboard.datasources.careData.lastReport, /bad&lt;blink&gt;/);
+    assert.doesNotMatch(dashboard.datasources.careData.lastReport, /<blink>/);
 });
