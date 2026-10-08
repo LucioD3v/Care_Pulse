@@ -1,4 +1,4 @@
-# CarePulse — Consent-Gated Family Wellness Follow-Ups
+# CarePulse — MCP — AI-Assisted Health Tracking & Proactive Agentic Care
 
 **CarePulse turns voice-reported wellness changes into a consent-gated follow-up workflow, using Alexa, AWS services, and the Model Context Protocol (MCP).**
 
