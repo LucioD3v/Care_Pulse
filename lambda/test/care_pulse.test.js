@@ -84,7 +84,8 @@ test('MCP surface matches the CarePulse strategy', () => {
         'compare_with_baseline',
         'create_followup',
         'request_consent',
-        'send_caregiver_alert'
+        'send_caregiver_alert',
+        'ingest_bee_context'
     ]);
 });
 
@@ -296,8 +297,10 @@ test('dashboard is sent only when APL is supported and voice remains available',
     }));
     const dashboard = screen.response.directives.find(item => item.type === 'Alexa.Presentation.APL.RenderDocument');
     assert.ok(dashboard);
-    assert.equal(dashboard.datasources.careData.lastReport, 'No recent report');
-    assert.equal(dashboard.datasources.careData.nextFollowup, 'None scheduled');
+    assert.equal(dashboard.token, 'wellnessSnapshot');
+    assert.equal(dashboard.datasources.wellnessData.followupScheduled, false);
+    assert.equal(dashboard.datasources.wellnessData.hasBeeData, false);
+    assert.equal(dashboard.datasources.wellnessData.signals.sleep.value, 'No data');
     assert.match(screen.response.outputSpeech.ssml, /summary/);
 
     const voiceOnly = await invokeAlexa(alexaRequest({ userId, intentName: 'GetWellnessSummaryIntent' }));
@@ -318,6 +321,8 @@ test('member and report text cannot inject spoken SSML or APL markup', async () 
     assert.match(result.response.outputSpeech.ssml, /E &lt;break\/&gt;/);
     assert.doesNotMatch(result.response.outputSpeech.ssml, /<break\/>/);
     const dashboard = result.response.directives.find(item => item.type === 'Alexa.Presentation.APL.RenderDocument');
-    assert.match(dashboard.datasources.careData.lastReport, /bad&lt;blink&gt;/);
-    assert.doesNotMatch(dashboard.datasources.careData.lastReport, /<blink>/);
+    const data = dashboard.datasources.wellnessData;
+    assert.equal(data.memberName, 'E &lt;break/&gt;');
+    assert.match(data.summaryLine, /bad&lt;blink&gt;/);
+    assert.doesNotMatch(JSON.stringify(data), /<blink>|<break/);
 });

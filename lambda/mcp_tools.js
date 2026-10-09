@@ -81,6 +81,44 @@ const MCP_TOOLS = [
             consentId: { type: 'string' },
             authorized: { type: 'boolean' }
         }, ['ownerId', 'memberName', 'caregiverName', 'signal', 'followupStatus', 'consentId', 'authorized'])
+    },
+    {
+        name: 'ingest_bee_context',
+        description: 'Ingest a Bee wearable export, extract wellness signals from text and healthKit data, and persist them as wellness events.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                ownerId: { type: 'string' },
+                memberName: { type: 'string' },
+                beeExport: {
+                    type: 'object',
+                    properties: {
+                        exportedAt: { type: 'string', format: 'date-time' },
+                        facts: {
+                            type: 'array',
+                            items: {
+                                type: 'object',
+                                properties: { content: { type: 'string' } }
+                            }
+                        },
+                        conversations: {
+                            type: 'array',
+                            items: {
+                                type: 'object',
+                                properties: { summary: { type: 'string' } }
+                            }
+                        },
+                        healthKit: {
+                            type: 'object',
+                            properties: { sleepHours: { type: 'number', minimum: 0, maximum: 24 } }
+                        }
+                    },
+                    required: ['exportedAt']
+                }
+            },
+            required: ['ownerId', 'memberName', 'beeExport'],
+            additionalProperties: false
+        }
     }
 ];
 
