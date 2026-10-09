@@ -30,6 +30,30 @@ async function putRecord(item) {
     return { ...item, source: 'mock' };
 }
 
+async function putRecordIfAbsent(item) {
+    const tableName = process.env.CARE_TABLE_NAME;
+    if (tableName) {
+        try {
+            await dynamoClient.send(new PutCommand({
+                TableName: tableName,
+                Item: item,
+                ConditionExpression: 'attribute_not_exists(sk)'
+            }));
+            return true;
+        } catch (error) {
+            if (error.name === 'ConditionalCheckFailedException') {
+                return false;
+            }
+            throw error;
+        }
+    }
+    if (mockRecords.some(record => record.pk === item.pk && record.sk === item.sk)) {
+        return false;
+    }
+    mockRecords.push(item);
+    return true;
+}
+
 async function queryPrefix(pk, prefix, limit = 100) {
     const tableName = process.env.CARE_TABLE_NAME;
     if (tableName) {
@@ -110,6 +134,7 @@ function resetMockRecords() {
 module.exports = {
     partitionKey,
     putRecord,
+    putRecordIfAbsent,
     queryPrefix,
     updateRecord,
     getRecord,

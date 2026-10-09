@@ -8,14 +8,12 @@ const {
     updateCarePreferences,
     getPendingFollowup,
     completeFollowup,
-    evaluateAlertPolicy,
-    getWellnessSnapshot,
-    getCareDashboard
+    evaluateAlertPolicy
 } = require('./care_service');
 const { renderVoiceObservation } = require('./voice_agent');
 const { escapeSsml, localDateTime, addOneDay } = require('./voice_format');
 const { CARD_TITLES, CARD_CONTENT, ALERT_STATUS, COPY } = require('./voice_copy');
-const { supportsDashboard, addCareDashboard } = require('./care_dashboard');
+const { createGetWellnessSummaryHandler } = require('./handlers/getWellnessSummaryHandler');
 
 const STATES = {
     AWAITING_FOLLOWUP_CONFIRMATION: 'AWAITING_FOLLOWUP_CONFIRMATION',
@@ -301,31 +299,12 @@ const CompleteFollowupIntentHandler = {
     }
 };
 
-const GetWellnessSummaryIntentHandler = {
-    canHandle(handlerInput) {
-        return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
-            && Alexa.getIntentName(handlerInput.requestEnvelope) === 'GetWellnessSummaryIntent';
-    },
-    async handle(handlerInput) {
-        const memberName = getSlotValue(handlerInput, 'memberName') || defaultMemberName();
-        const timeframe = getSlotValue(handlerInput, 'timeframe') || 'this week';
-        const userOwnerId = ownerId(handlerInput);
-        const [snapshot, context] = await Promise.all([
-            getWellnessSnapshot({ ownerId: userOwnerId, memberName, timeframe }),
-            getCareContext({ ownerId: userOwnerId, memberName })
-        ]);
-        const signalText = snapshot.signals.length ? snapshot.signals.join(', ') : 'no recent signals';
-        const speech = context.summaryLength === 'detailed'
-            ? COPY.summaryDetailed(memberName, timeframe, snapshot, signalText)
-            : COPY.summaryShort(memberName, timeframe, snapshot);
-        if (supportsDashboard(handlerInput)) {
-            addCareDashboard(handlerInput, await getCareDashboard({ ownerId: userOwnerId, memberName }));
-        }
-        return speakText(handlerInput, speech)
-            .withSimpleCard(CARD_TITLES.summary, CARD_CONTENT.summary(memberName, timeframe, snapshot, signalText))
-            .getResponse();
-    }
-};
+const GetWellnessSummaryIntentHandler = createGetWellnessSummaryHandler({
+    getSlotValue,
+    ownerId,
+    defaultMemberName,
+    speakText
+});
 
 const SetCarePreferencesIntentHandler = {
     canHandle(handlerInput) {
@@ -507,3 +486,33 @@ exports.handler = Alexa.SkillBuilders.custom()
     .lambda();
 
 exports._private = { ownerId, localDateTime, followupSchedule, STATES };
+
+function timeframeStart(timeframe, now = new Date()) {
+    if (timeframe === 'today') {
+        const start = new Date(now);
+        start.setUTCHours(0, 0, 0, 0);
+        return start;
+    }
+    return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+}
+
+function summarizeVitals(readings, timeframe) {
+    if (!readings.length) {
+        return `I couldn't find any health readings for ${timeframe}.`;
+    }
+    const groups = {};
+    for (const reading of readings) {
+        if (!groups[reading.Metric]) {
+            groups[reading.Metric] = { values: [], unit: reading.Unit };
+        }
+        groups[reading.Metric].values.push(reading.Value);
+    }
+    const count = readings.length;
+    const parts = Object.entries(groups).map(([metric, { values, unit }]) => {
+        const avg = values.reduce((sum, v) => sum + v, 0) / values.length;
+        return `average ${metric} was ${avg} ${unit}`;
+    });
+    return `I found ${count} readings. ${parts.join(', ')}. This is not medical advice.`;
+}
+
+exports._test = { timeframeStart, summarizeVitals };

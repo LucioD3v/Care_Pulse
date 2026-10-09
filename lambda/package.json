@@ -4,7 +4,7 @@
     "description": "Consent-gated family wellness follow-ups for Alexa",
     "main": "index.js",
     "scripts": {
-      "test": "node --test test/care_pulse.test.js",
+      "test": "node --test \"test/**/*.test.js\"",
       "seed:demo": "node seed_demo.js"
     },
     "author": "CarePulse team",
