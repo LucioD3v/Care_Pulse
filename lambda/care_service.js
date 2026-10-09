@@ -1,108 +1,20 @@
 'use strict';
 
 const { randomUUID } = require('node:crypto');
-const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
-const { DynamoDBDocumentClient, PutCommand, QueryCommand, UpdateCommand, GetCommand, DeleteCommand } = require('@aws-sdk/lib-dynamodb');
 const { sendCaregiverAlert: publishCaregiverAlert } = require('./sns_notifier');
-
-const dynamoClient = DynamoDBDocumentClient.from(new DynamoDBClient({
-    region: process.env.AWS_REGION || 'us-east-1'
-}));
-const mockRecords = [];
-
-function objectSchema(properties, required) {
-    return { type: 'object', properties, required, additionalProperties: false };
-}
-
-const MCP_TOOLS = [
-    {
-        name: 'get_care_context',
-        description: 'Return the authorized care context, baseline, caregiver, and active preferences for one member.',
-        inputSchema: objectSchema({
-            ownerId: { type: 'string' },
-            memberName: { type: 'string' }
-        }, ['ownerId', 'memberName'])
-    },
-    {
-        name: 'log_wellness_event',
-        description: 'Record a non-diagnostic wellness signal with provenance and timestamp.',
-        inputSchema: objectSchema({
-            ownerId: { type: 'string' },
-            memberName: { type: 'string' },
-            signal: { type: 'string' },
-            state: { type: 'string' },
-            details: { type: 'string' },
-            numericValue: { type: 'number' },
-            recordedAt: { type: 'string', format: 'date-time' },
-            source: { type: 'string' }
-        }, ['ownerId', 'memberName', 'signal', 'state'])
-    },
-    {
-        name: 'get_wellness_history',
-        description: 'Retrieve the minimum authorized wellness history needed for the current request.',
-        inputSchema: objectSchema({
-            ownerId: { type: 'string' },
-            memberName: { type: 'string' },
-            timeframe: { type: 'string', enum: ['today', 'this week', 'this month'] },
-            limit: { type: 'integer', minimum: 1, maximum: 100 }
-        }, ['ownerId', 'memberName'])
-    },
-    {
-        name: 'compare_with_baseline',
-        description: 'Compare recent signals with a configured personal routine and report changes, not diagnoses.',
-        inputSchema: objectSchema({
-            ownerId: { type: 'string' },
-            memberName: { type: 'string' },
-            signal: { type: 'string' }
-        }, ['ownerId', 'memberName', 'signal'])
-    },
-    {
-        name: 'create_followup',
-        description: 'Create a pending wellness check-in for a specific member and signal.',
-        inputSchema: objectSchema({
-            ownerId: { type: 'string' },
-            memberName: { type: 'string' },
-            signal: { type: 'string' },
-            dueDate: { type: 'string' },
-            dueTime: { type: 'string' }
-        }, ['ownerId', 'memberName', 'signal', 'dueDate', 'dueTime'])
-    },
-    {
-        name: 'request_consent',
-        description: 'Record explicit, scoped, expiring consent before information is shared with a caregiver.',
-        inputSchema: objectSchema({
-            ownerId: { type: 'string' },
-            memberName: { type: 'string' },
-            caregiverName: { type: 'string' },
-            signal: { type: 'string' },
-            followupId: { type: 'string' },
-            expiresAt: { type: 'integer' }
-        }, ['ownerId', 'memberName', 'caregiverName', 'signal', 'followupId'])
-    },
-    {
-        name: 'send_caregiver_alert',
-        description: 'Send a minimum-data caregiver alert only after a deterministic policy decision permits it.',
-        inputSchema: objectSchema({
-            ownerId: { type: 'string' },
-            memberName: { type: 'string' },
-            caregiverName: { type: 'string' },
-            signal: { type: 'string' },
-            followupStatus: { type: 'string' },
-            consentId: { type: 'string' },
-            authorized: { type: 'boolean' }
-        }, ['ownerId', 'memberName', 'caregiverName', 'signal', 'followupStatus', 'consentId', 'authorized'])
-    }
-];
+const { MCP_TOOLS } = require('./mcp_tools');
+const {
+    partitionKey,
+    putRecord,
+    queryPrefix,
+    updateRecord,
+    getRecord,
+    deleteRecord,
+    resetMockRecords
+} = require('./care_repository');
 
 function normalized(value) {
     return String(value || '').trim().toLowerCase().replace(/\s+/g, '-');
-}
-
-function partitionKey(ownerId) {
-    if (!ownerId) {
-        throw new TypeError('ownerId is required.');
-    }
-    return `USER#${ownerId}`;
 }
 
 function timeframeStart(timeframe) {
@@ -110,67 +22,6 @@ function timeframeStart(timeframe) {
         : timeframe === 'this month' ? 30 * 24 * 60 * 60 * 1000
             : 7 * 24 * 60 * 60 * 1000;
     return new Date(Date.now() - duration).toISOString();
-}
-
-async function putRecord(item) {
-    const tableName = process.env.CARE_TABLE_NAME;
-    if (tableName) {
-        await dynamoClient.send(new PutCommand({ TableName: tableName, Item: item }));
-        return { ...item, source: 'dynamodb' };
-    }
-    const existingIndex = mockRecords.findIndex(record => record.pk === item.pk && record.sk === item.sk);
-    if (existingIndex >= 0) {
-        mockRecords[existingIndex] = item;
-    } else {
-        mockRecords.push(item);
-    }
-    return { ...item, source: 'mock' };
-}
-
-async function queryPrefix(pk, prefix, limit = 100) {
-    const tableName = process.env.CARE_TABLE_NAME;
-    if (tableName) {
-        const result = await dynamoClient.send(new QueryCommand({
-            TableName: tableName,
-            KeyConditionExpression: 'pk = :pk AND begins_with(sk, :prefix)',
-            ExpressionAttributeValues: { ':pk': pk, ':prefix': prefix },
-            ScanIndexForward: false,
-            Limit: limit
-        }));
-        return result.Items || [];
-    }
-    return mockRecords
-        .filter(record => record.pk === pk && record.sk.startsWith(prefix))
-        .sort((left, right) => right.sk.localeCompare(left.sk))
-        .slice(0, limit);
-}
-
-async function updateRecord(pk, sk, values) {
-    const tableName = process.env.CARE_TABLE_NAME;
-    if (tableName) {
-        const names = {};
-        const expressionValues = {};
-        const assignments = Object.entries(values).map(([key, value], index) => {
-            names[`#field${index}`] = key;
-            expressionValues[`:value${index}`] = value;
-            return `#field${index} = :value${index}`;
-        });
-        const result = await dynamoClient.send(new UpdateCommand({
-            TableName: tableName,
-            Key: { pk, sk },
-            UpdateExpression: `SET ${assignments.join(', ')}`,
-            ExpressionAttributeNames: names,
-            ExpressionAttributeValues: expressionValues,
-            ReturnValues: 'ALL_NEW'
-        }));
-        return result.Attributes;
-    }
-    const record = mockRecords.find(item => item.pk === pk && item.sk === sk);
-    if (!record) {
-        throw new Error(`Record not found: ${sk}`);
-    }
-    Object.assign(record, values);
-    return { ...record };
 }
 
 async function getCareContext({ ownerId, memberName }) {
@@ -188,8 +39,38 @@ async function getCareContext({ ownerId, memberName }) {
         caregiverName: process.env.DEFAULT_CAREGIVER_NAME || 'Laura',
         baselineSleepHours: Number(process.env.DEFAULT_BASELINE_SLEEP_HOURS || 7.5),
         timezone: process.env.DEFAULT_TIME_ZONE || 'America/Mexico_City',
+        summaryLength: 'short',
+        preferredFollowupTime: '18:00',
+        followupOffers: 'on',
         createdAt: new Date().toISOString()
     });
+}
+
+async function updateCarePreferences({ ownerId, memberName, summaryLength, preferredFollowupTime, followupOffers }) {
+    const changes = {};
+    if (summaryLength !== undefined) {
+        if (!['short', 'detailed'].includes(summaryLength)) {
+            throw new TypeError('Summary length must be short or detailed.');
+        }
+        changes.summaryLength = summaryLength;
+    }
+    if (preferredFollowupTime !== undefined) {
+        if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(preferredFollowupTime)) {
+            throw new TypeError('Preferred follow-up time must use HH:mm.');
+        }
+        changes.preferredFollowupTime = preferredFollowupTime;
+    }
+    if (followupOffers !== undefined) {
+        if (!['on', 'off'].includes(followupOffers)) {
+            throw new TypeError('Follow-up offers must be on or off.');
+        }
+        changes.followupOffers = followupOffers;
+    }
+    if (!Object.keys(changes).length) {
+        throw new TypeError('At least one preference is required.');
+    }
+    const context = await getCareContext({ ownerId, memberName });
+    return updateRecord(context.pk, context.sk, changes);
 }
 
 async function logWellnessEvent({ ownerId, memberName, signal, state, details = '', numericValue, recordedAt = new Date().toISOString(), source = 'voice' }) {
@@ -369,17 +250,7 @@ async function getMcpSession(sessionId) {
         return null;
     }
     const pk = `MCPSESSION#${sessionId}`;
-    const tableName = process.env.CARE_TABLE_NAME;
-    let session;
-    if (tableName) {
-        const result = await dynamoClient.send(new GetCommand({
-            TableName: tableName,
-            Key: { pk, sk: 'SESSION' }
-        }));
-        session = result.Item;
-    } else {
-        session = mockRecords.find(record => record.pk === pk && record.sk === 'SESSION');
-    }
+    const session = await getRecord(pk, 'SESSION');
     if (!session || session.expiresAt <= Math.floor(Date.now() / 1000)) {
         return null;
     }
@@ -388,18 +259,7 @@ async function getMcpSession(sessionId) {
 
 async function deleteMcpSession(sessionId) {
     const pk = `MCPSESSION#${sessionId}`;
-    const tableName = process.env.CARE_TABLE_NAME;
-    if (tableName) {
-        await dynamoClient.send(new DeleteCommand({
-            TableName: tableName,
-            Key: { pk, sk: 'SESSION' }
-        }));
-    } else {
-        const index = mockRecords.findIndex(record => record.pk === pk && record.sk === 'SESSION');
-        if (index >= 0) {
-            mockRecords.splice(index, 1);
-        }
-    }
+    await deleteRecord(pk, 'SESSION');
 }
 
 async function getWellnessSnapshot({ ownerId, memberName, timeframe = 'this week' }) {
@@ -413,6 +273,32 @@ async function getWellnessSnapshot({ ownerId, memberName, timeframe = 'this week
         signals,
         status: history.length >= 2 ? 'change observed' : 'not enough information',
         followup: pending ? `pending for ${pending.dueDate} at ${pending.dueTime}` : 'none pending'
+    };
+}
+
+async function getCareDashboard({ ownerId, memberName }) {
+    const [history, followup, context] = await Promise.all([
+        getWellnessHistory({ ownerId, memberName, timeframe: 'this month', limit: 1 }),
+        getPendingFollowup({ ownerId, memberName }),
+        getCareContext({ ownerId, memberName })
+    ]);
+    const consent = followup ? await findActiveConsent({
+        ownerId,
+        memberName,
+        caregiverName: context.caregiverName,
+        signal: followup.signal,
+        followupId: followup.followupId
+    }) : null;
+    const lastReportDate = history[0]
+        ? new Intl.DateTimeFormat('en-US', { timeZone: context.timezone || 'America/Mexico_City', year: 'numeric', month: 'short', day: 'numeric' })
+            .format(new Date(history[0].recordedAt))
+        : null;
+    return {
+        lastReport: history[0] ? `${history[0].signal.replace(/-/g, ' ')} on ${lastReportDate}` : 'No recent report',
+        nextFollowup: followup ? `${followup.dueDate} at ${followup.dueTime}` : 'None scheduled',
+        permission: !followup ? 'No follow-up awaiting permission'
+            : consent ? `Active for ${context.caregiverName} on this follow-up`
+                : `No active permission for ${context.caregiverName} on the next follow-up`
     };
 }
 
@@ -432,14 +318,11 @@ async function callTool(name, input) {
     return handlers[name](input);
 }
 
-function resetMockRecords() {
-    mockRecords.length = 0;
-}
-
 module.exports = {
     MCP_TOOLS,
     callTool,
     getCareContext,
+    updateCarePreferences,
     logWellnessEvent,
     getWellnessHistory,
     compareWithBaseline,
@@ -454,5 +337,6 @@ module.exports = {
     getMcpSession,
     deleteMcpSession,
     getWellnessSnapshot,
+    getCareDashboard,
     resetMockRecords
 };

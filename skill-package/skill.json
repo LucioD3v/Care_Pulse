@@ -5,16 +5,16 @@
         "en-US": {
           "summary": "Coordinate family wellness follow-ups with context and consent.",
           "examplePhrases": [
-            "Alexa, open Care Pulse",
+            "Alexa, open CarePulse",
             "I feel more tired than usual",
             "give me my wellness summary"
           ],
-          "name": "Care Pulse",
+          "name": "CarePulse",
           "description": "CarePulse helps a family record everyday wellness signals, notice changes from an established routine, schedule follow-ups, and notify an authorized caregiver when a configured condition repeats. CarePulse does not diagnose or replace professional or emergency care."
         }
       },
       "isAvailableWorldwide": true,
-      "testingInstructions": "Use the en-US model. Say: I feel more tired than usual. Accept the follow-up and scoped caregiver consent. Then say: I still feel the same. Verify the Family Wellness Snapshot card and the authorized SNS notification.",
+      "testingInstructions": "Use the en-US model. Say: I feel more tired than usual. Accept the follow-up and scoped caregiver consent. Then say: I still feel the same. Verify the CarePulse follow-up card and the authorized SNS notification. Test summaries and preferences by saying: use detailed summaries; set my follow up time to eight PM. Enable the Alexa.Presentation.APL interface before testing the optional screen dashboard.",
       "category": "HEALTH_AND_FITNESS",
       "distributionCountries": []
     },
@@ -22,7 +22,18 @@
       "custom": {
         "endpoint": {
           "uri": "arn:aws:lambda:us-east-1:171489363667:function:ask-CarePulse-default-skillStac-AlexaSkillFunction-bMieLwrYt6ZE"
-        }
+        },
+        "interfaces": [
+          {
+            "type": "ALEXA_PRESENTATION_APL",
+            "supportedViewports": [
+              { "mode": "HUB", "shape": "ROUND", "minWidth": 100, "maxWidth": 599, "minHeight": 100, "maxHeight": 599 },
+              { "mode": "HUB", "shape": "RECTANGLE", "minWidth": 960, "maxWidth": 1279, "minHeight": 600, "maxHeight": 959 },
+              { "mode": "HUB", "shape": "RECTANGLE", "minWidth": 1280, "maxWidth": 1920, "minHeight": 600, "maxHeight": 1279 },
+              { "mode": "TV", "shape": "RECTANGLE", "minWidth": 960, "maxWidth": 960, "minHeight": 540, "maxHeight": 540 }
+            ]
+          }
+        ]
       }
     },
     "manifestVersion": "1.0"

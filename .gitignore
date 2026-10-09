@@ -1,4 +1,11 @@
 node_modules/
 package-lock.json
+.env
 .serverless/
 .DS_Store
+
+# LocalStack-only development files
+/compose.yaml
+/Dockerfile.localstack
+/infrastructure/localstack/
+/test/events/

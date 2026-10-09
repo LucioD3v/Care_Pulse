@@ -1,0 +1,28 @@
+{
+  "type": "APL",
+  "version": "1.7",
+  "theme": "dark",
+  "background": "#142638",
+  "mainTemplate": {
+    "parameters": ["careData"],
+    "items": [
+      {
+        "type": "Container",
+        "width": "100vw",
+        "height": "100vh",
+        "paddingLeft": "6vw",
+        "paddingRight": "6vw",
+        "paddingTop": "5vh",
+        "items": [
+          { "type": "Text", "text": "CarePulse", "fontSize": "36dp", "color": "#FFFFFF" },
+          { "type": "Text", "text": "Latest report", "fontSize": "20dp", "color": "#B8D9DD", "paddingTop": "4vh" },
+          { "type": "Text", "text": "${careData.lastReport}", "fontSize": "25dp", "color": "#FFFFFF", "maxLines": 2 },
+          { "type": "Text", "text": "Next follow-up", "fontSize": "20dp", "color": "#B8D9DD", "paddingTop": "4vh" },
+          { "type": "Text", "text": "${careData.nextFollowup}", "fontSize": "25dp", "color": "#FFFFFF", "maxLines": 2 },
+          { "type": "Text", "text": "Sharing permission", "fontSize": "20dp", "color": "#B8D9DD", "paddingTop": "4vh" },
+          { "type": "Text", "text": "${careData.permission}", "fontSize": "25dp", "color": "#FFFFFF", "maxLines": 2 }
+        ]
+      }
+    ]
+  }
+}

@@ -1,13 +1,8 @@
 'use strict';
 
 const { timingSafeEqual } = require('node:crypto');
-const {
-    MCP_TOOLS,
-    callTool,
-    createMcpSession,
-    getMcpSession,
-    deleteMcpSession
-} = require('./mcp_client');
+const { MCP_TOOLS } = require('./mcp_tools');
+const { callTool, createMcpSession, getMcpSession, deleteMcpSession } = require('./care_service');
 
 const PROTOCOL_VERSION = '2025-11-25';
 

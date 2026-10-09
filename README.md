@@ -1,4 +1,4 @@
-# CarePulse MCP — AI-Assisted Health Tracking & Proactive Agentic Care
+# CarePulse — MCP — AI-Assisted Health Tracking & Proactive Agentic Care
 
 **CarePulse turns voice-reported wellness changes into a consent-gated follow-up workflow, using Alexa, AWS services, and the Model Context Protocol (MCP).**
 
@@ -26,22 +26,22 @@ CarePulse is not a medical device, does not diagnose, and is not an emergency se
 The interaction model is `en-US`. This is the representative seeded Elena/Laura conversation contributed by the team. The seed creates two recent tiredness reports and three nights of sleep below Elena's 7.5-hour baseline, so the example observation has supporting demo data. Bedrock may paraphrase that observation; the consent and follow-up turns are driven by the application handlers.
 
 ```text
-Elena: Alexa, open Care Pulse.
-Alexa: Welcome to Care Pulse. You can tell me how you feel, ask for a wellness
+Elena: Alexa, open CarePulse.
+Alexa: Welcome to CarePulse. You can tell me how you feel, ask for a wellness
   summary, or schedule a check-in. How can I help?
 
 Elena: I feel more tired than usual.
 Alexa: I found similar tiredness reports and sleep below your usual routine. This is a
-  change worth following up on, not a diagnosis. Would you like me to
-  check in again at six?
+  change worth following up on, not a diagnosis. Would you like to
+  check in again at 6 PM?
 Elena: Yes.
-Alexa: The follow-up is scheduled for six. Do you authorize Laura to receive a
+Alexa: The check-in is scheduled for 6 PM. Do you authorize Laura to receive a
   brief alert only if you report tiredness again during this follow-up?
 Elena: Yes.
 Alexa: Done. Your permission applies only to this follow-up, and no other
   information will be shared with Laura.
 
-Later, after the follow-up is due, Elena opens Care Pulse again:
+Later, after the follow-up is due, Elena opens CarePulse again:
 
 Alexa: Elena, we planned to check how you were feeling. Do you feel better,
   the same, or worse?
@@ -127,10 +127,15 @@ The DynamoDB table enables TTL on the numeric `expiresAt` attribute. Consent che
 |   |-- skill.json                         # Alexa skill manifest
 |   `-- interactionModels/custom/en-US.json # Voice intents and slot types
 |-- lambda/
-|   |-- index.js                           # Alexa ASK SDK handlers
+|   |-- index.js                           # Alexa Lambda entry point
+|   |-- alexa_handlers.js                  # ASK request handlers
+|   |-- care_service.js                    # Shared wellness and consent rules
+|   |-- care_repository.js                 # DynamoDB and local storage adapter
+|   |-- mcp_tools.js                       # MCP tool catalog
 |   |-- voice_agent.js                     # Bedrock voice rendering
+|   |-- voice_copy.js, voice_format.js     # English voice copy and formatting
+|   |-- care_dashboard.js, apl/            # Optional ASK screen dashboard
 |   |-- mcp_http.js                        # MCP JSON-RPC HTTP gateway
-|   |-- mcp_client.js                      # Tool schemas, policies, DynamoDB operations
 |   |-- sns_notifier.js                    # Caregiver notifications
 |   |-- seed_demo.js                       # Hackathon demo data
 |   `-- test/                              # Node.js test suite
@@ -152,7 +157,7 @@ flowchart LR
   alexa -->|Skill request| skill[ASK SDK Lambda]
 
   subgraph AlexaFlow[Alexa conversation flow]
-    skill -->|Report: load context and record event| tools[Shared MCP tool implementations<br/>mcp_client.js, in-process]
+    skill -->|Report: load context and record event| tools[Shared care_service.js<br/>in-process]
     tools -->|Read/write context, events, follow-ups, consent| table[(DynamoDB care table)]
     tools -->|Compare recent signals with routine| baseline[Deterministic baseline policy]
     baseline -->|Structured facts only| voice[Bedrock Converse<br/>voice wording only]
@@ -209,6 +214,8 @@ npm install --prefix lambda
 npm test --prefix lambda
 ```
 
+The `npm test` command runs the maintained CarePulse conversation and MCP suite. Legacy local files from the earlier vitals prototype are outside the current deployment and test path.
+
 ### Environment and Deployment Parameters
 
 | Setting | Source / purpose |
@@ -236,7 +243,7 @@ After deployment:
 
 1. Read the CloudFormation outputs `AlexaLambdaArn`, `McpEndpoint`, `CarePulseTableName`, and `CaregiverAlertsTopicArn`.
 2. In Alexa Developer Console, open your custom skill and confirm its Skill ID matches the `alexaSkillId` deployment parameter.
-3. Under **Build → Interaction Model → JSON Editor**, paste the contents of `skill-package/interactionModels/custom/en-US.json`, save, and build the model. Confirm the locale is **English (US)** and the invocation name is **care pulse**.
+3. Under **Build → Interaction Model → JSON Editor**, paste the contents of `skill-package/interactionModels/custom/en-US.json`, save, and build the model. Confirm the locale is **English (US)** and the invocation name is **care pulse**. Enable the `Alexa.Presentation.APL` interface to test the optional dashboard on supported devices.
 4. Under **Build → Endpoint**, select **AWS Lambda ARN** for the skill's endpoint region and paste `AlexaLambdaArn`. Save the endpoint.
 5. Open **Test**, switch the test stage to **Development**, and enable testing for the development version of the skill. Use the Alexa simulator input to send the utterances below; the test tab invokes the deployed Lambda, so AWS credentials, Bedrock model access, and the deployed resources must already be valid.
 6. Subscribe the authorized test caregiver to `CaregiverAlertsTopicArn`. Confirm the email subscription before running the notification scene.
@@ -248,8 +255,8 @@ This is the actual ASK SDK conversation flow, split into setup and a later check
 
 | Console input | What the handler does | Expected next response |
 | :--- | :--- | :--- |
-| `open Care Pulse` | Starts the custom Alexa Skill. | Welcome prompt. |
-| `I feel more tired than usual` | `ReportWellnessIntent` records the signal and compares it with recent reports and routine. | Bedrock-rendered observation, then asks whether to check in at six. |
+| `open CarePulse` | Starts the custom Alexa Skill. | Welcome prompt. |
+| `I feel more tired than usual` | `ReportWellnessIntent` records the signal and compares it with recent reports and routine. | Bedrock-rendered observation, then asks whether to check in at 6 PM unless suggestions are off. |
 | `Yes` | Confirms the follow-up and creates it for 6:00 PM. | Confirms the schedule, then asks whether Laura may receive a narrowly scoped alert. |
 | `Yes` | `AMAZON.YesIntent` stores consent for that signal and follow-up only. | Confirms the scope of permission. |
 
@@ -257,12 +264,18 @@ The two `Yes` answers have different meanings: the first creates the follow-up; 
 
 | Console input | What the handler does | Expected next response |
 | :--- | :--- | :--- |
-| `open Care Pulse` | `LaunchRequestHandler` finds the due follow-up. | Asks whether Elena feels better, the same, or worse. |
+| `open CarePulse` | `LaunchRequestHandler` finds the due follow-up. | Asks whether Elena feels better, the same, or worse. |
 | `I feel the same` | `CompleteFollowupIntent` records the answer and evaluates the scoped consent. | Sends the brief alert if SNS accepted the publish; without SNS delivery, asks the user to contact Laura directly. |
 
 The simulator does not advance Lambda's clock. For the normal demo, start before 6:00 PM and return after it. For an accelerated integration test, a trusted test operator can create a test-only follow-up due a few minutes ahead with the authenticated MCP `create_followup` tool, wait until it is due, and reopen the Skill. Do not use production member data.
 
 To verify the no-alert branch, repeat with a test identity, decline the second permission question, and complete the due check-in; or answer `I feel better` after a consented check-in. Try `Give me my wellness summary` to test `GetWellnessSummaryIntent`.
+
+### Voice and screen preferences
+
+The ASK skill supports English (US) preference commands: `use short summaries`, `use detailed summaries`, `set my follow up time to eight PM`, and `turn off follow up suggestions` (`turn on follow up suggestions` restores them). Summary length changes spoken detail; the card still contains the full summary. The preferred time applies to newly created follow-ups when the user does not specify a time. Turning suggestions off leaves reporting and explicit follow-up requests available. The current MVP stores these preferences in the member context.
+
+On an APL-capable device, an explicit summary request includes a simple dashboard with the latest report from the last 30 days, the next stored follow-up, and the active permission for the default caregiver on that follow-up. The summary remains fully usable by voice without APL. The interface is declared in `skill-package/skill.json`; enable it in the Developer Console as well if updating the skill there manually. This dashboard is part of the ASK experience, not a registered Alexa+ MCP App UI. See [Amazon's ASK APL integration guide](https://developer.amazon.com/en-US/docs/alexa/alexa-presentation-language/use-apl-with-ask-sdk.html).
 
 If the Skill does not respond as expected, verify that the interaction model built successfully, the `AlexaLambdaArn` and region are correct under **Build → Endpoint**, and the stage is **Development**. Then inspect the `alexaSkill` Lambda logs in CloudWatch. The deployed voice flow requires `BEDROCK_MODEL_ID` and access to that model in the selected region.
 
