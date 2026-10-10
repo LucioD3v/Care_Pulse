@@ -119,6 +119,29 @@
             "I need emergency help"
           ]
         },
+        {
+          "name": "LinkBeeIntent",
+          "slots": [],
+          "samples": [
+            "link my bee",
+            "connect my bee",
+            "link my bee wearable",
+            "connect my bee wearable",
+            "use my bee data",
+            "allow care pulse to use my bee data"
+          ]
+        },
+        {
+          "name": "UnlinkBeeIntent",
+          "slots": [],
+          "samples": [
+            "unlink my bee",
+            "disconnect my bee",
+            "stop using my bee data",
+            "delete my bee data",
+            "remove my bee data"
+          ]
+        },
         { "name": "AMAZON.YesIntent", "samples": [] },
         { "name": "AMAZON.NoIntent", "samples": [] },
         { "name": "AMAZON.CancelIntent", "samples": [] },

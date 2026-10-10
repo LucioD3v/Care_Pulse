@@ -30,6 +30,30 @@ async function putRecord(item) {
     return { ...item, source: 'mock' };
 }
 
+async function putRecordIfAbsent(item) {
+    const tableName = process.env.CARE_TABLE_NAME;
+    if (tableName) {
+        try {
+            await dynamoClient.send(new PutCommand({
+                TableName: tableName,
+                Item: item,
+                ConditionExpression: 'attribute_not_exists(sk)'
+            }));
+            return true;
+        } catch (error) {
+            if (error.name === 'ConditionalCheckFailedException') {
+                return false;
+            }
+            throw error;
+        }
+    }
+    if (mockRecords.some(record => record.pk === item.pk && record.sk === item.sk)) {
+        return false;
+    }
+    mockRecords.push(item);
+    return true;
+}
+
 async function queryPrefix(pk, prefix, limit = 100) {
     const tableName = process.env.CARE_TABLE_NAME;
     if (tableName) {
@@ -46,6 +70,26 @@ async function queryPrefix(pk, prefix, limit = 100) {
         .filter(record => record.pk === pk && record.sk.startsWith(prefix))
         .sort((left, right) => right.sk.localeCompare(left.sk))
         .slice(0, limit);
+}
+
+async function queryAllPrefix(pk, prefix) {
+    const tableName = process.env.CARE_TABLE_NAME;
+    if (!tableName) {
+        return mockRecords.filter(record => record.pk === pk && record.sk.startsWith(prefix));
+    }
+    const items = [];
+    let exclusiveStartKey;
+    do {
+        const result = await dynamoClient.send(new QueryCommand({
+            TableName: tableName,
+            KeyConditionExpression: 'pk = :pk AND begins_with(sk, :prefix)',
+            ExpressionAttributeValues: { ':pk': pk, ':prefix': prefix },
+            ExclusiveStartKey: exclusiveStartKey
+        }));
+        items.push(...(result.Items || []));
+        exclusiveStartKey = result.LastEvaluatedKey;
+    } while (exclusiveStartKey);
+    return items;
 }
 
 async function updateRecord(pk, sk, values) {
@@ -110,7 +154,9 @@ function resetMockRecords() {
 module.exports = {
     partitionKey,
     putRecord,
+    putRecordIfAbsent,
     queryPrefix,
+    queryAllPrefix,
     updateRecord,
     getRecord,
     deleteRecord,

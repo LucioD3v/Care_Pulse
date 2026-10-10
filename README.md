@@ -82,7 +82,7 @@ The default follow-up is stored for 6:00 PM in the member's configured time zone
 
 ## MCP Toolset Specification
 
-The following six names describe the requested target tool contract. The **Current implementation** column is intentional: the deployed MCP `tools/list` surface has seven tools, uses `ownerId` rather than `user_id`, and does not yet expose every target name or behavior.
+The following six names describe the requested target tool contract. The **Current implementation** column is intentional: the deployed MCP `tools/list` surface has eight tools, uses `ownerId` rather than `user_id`, and does not yet expose every target name or behavior.
 
 | MCP tool (target) | Input parameters (target contract) | Purpose and infrastructure backend | Current implementation |
 | :--- | :--- | :--- | :--- |
@@ -95,7 +95,90 @@ The following six names describe the requested target tool contract. The **Curre
 
 ### Tools Currently Returned by `tools/list`
 
-The live MCP server currently exposes seven tools: `get_care_context`, `log_wellness_event`, `get_wellness_history`, `compare_with_baseline`, `create_followup`, `request_consent`, and `send_caregiver_alert`. `get_wellness_history` and `create_followup` are implementation tools beyond the six-tool target table. The server is a Node.js JSON-RPC Streamable HTTP gateway using MCP protocol version `2025-11-25`; its endpoint requires the `x-carepulse-mcp-key` header and an MCP session.
+The live MCP server currently exposes eight tools: `get_care_context`, `log_wellness_event`, `get_wellness_history`, `compare_with_baseline`, `create_followup`, `request_consent`, `send_caregiver_alert`, and `ingest_bee_context`. `get_wellness_history`, `create_followup`, and `ingest_bee_context` are implementation tools beyond the six-tool target table. The server is a Node.js JSON-RPC Streamable HTTP gateway using MCP protocol version `2025-11-25`; its endpoint requires the `x-carepulse-mcp-key` header and an MCP session.
+
+## Bee Wearable Ingestion (Preview)
+
+> [!NOTE]
+> **Preview.** CarePulse can receive Bee-derived context through MCP, gated by the member's voice consent, and show it on the Wellness Snapshot card. The included bridge script (`scripts/bee_bridge.js`) reads Bee data on the member's computer through Bee's local developer proxy and sends it in the input format below; there is no hosted Bee connector yet.
+
+### Flow
+
+```
+"Alexa, ask care pulse to link my Bee" ──► consent explained ──► "yes"
+        │
+        └─► link code shown only in the Alexa app card (stored as a SHA-256 hash, expires in 30 days)
+
+Bee app ──► Bee CLI / API ──► caller maps data ──► MCP tools/call ingest_bee_context { linkCode, beeExport }
+        │
+        └─► link + consent verified ──► wearer-only text ──► signals (no transcripts) ──► DynamoDB (provenance: bee)
+
+"Alexa, give me my wellness summary" ──► voice summary + Wellness Snapshot card (Bee 🐝 badge on screens)
+"Alexa, ask care pulse to unlink my Bee" ──► "yes" ──► consent revoked, link code invalid, Bee signals deleted
+```
+
+1. **Consent by voice.** `LinkBeeIntent` explains what is used, what is stored, the 30-day duration (`BEE_CONSENT_DAYS`), and how to stop. Only a "yes" creates the consent and the link code; the code is never spoken aloud.
+2. **The link code decides whose data is written.** `ingest_bee_context` takes `linkCode`, not `ownerId`, so an MCP caller cannot write Bee data into an arbitrary member. Linking again invalidates the previous code.
+3. **Wearer-only analysis.** Bee also records other people. Only utterances marked `speaker: "wearer"` and facts with `confirmed: true` are analyzed; Bee conversation summaries are ignored because they mix speakers. The response reports what was ignored.
+4. **Derived signals only.** Tiredness, sleep, mood, appetite, dizziness, and discomfort are detected with intensity from wording; optional `healthKit.sleepHours` is compared with the member's baseline. No Bee text is stored. Re-sending the same export (same `exportedAt`) is skipped, and Bee events expire after 90 days through `expiresAt`.
+5. **Revocation deletes data.** `UnlinkBeeIntent` revokes consent, invalidates the code, and deletes every Bee-derived event while keeping voice reports.
+
+### Input format (CarePulse contract)
+
+```json
+{
+  "linkCode": "ABCD-2345",
+  "beeExport": {
+    "exportedAt": "2026-10-09T18:00:00Z",
+    "facts": [{ "text": "I felt completely exhausted after lunch", "confirmed": true }],
+    "conversations": [{
+      "utterances": [
+        { "speaker": "wearer", "text": "I am very anxious about the appointment" },
+        { "speaker": "other", "text": "This is ignored" }
+      ]
+    }],
+    "healthKit": { "sleepHours": 5 }
+  }
+}
+```
+
+Response: `{ success, eventsIngested, signalsDetected, skipped, ignored: { unconfirmedFacts, otherSpeakerUtterances }, errors }`.
+
+### Testing with a real Bee account
+
+`scripts/bee_bridge.js` reads the member's data from the local Bee proxy and sends it to CarePulse. It has no dependencies (Node.js 22+), never prints spoken text, and only sends confirmed facts and lines spoken by the wearer.
+
+1. **Deploy this branch** and rebuild the interaction model so `LinkBeeIntent` and `UnlinkBeeIntent` exist. Note the MCP endpoint URL (ending in `/mcp`) and the `MCP_API_KEY`.
+2. **Link Bee by voice.** In the Alexa Developer Console (Test tab) or on an Echo, say "ask care pulse to link my Bee" and answer "yes". Copy the code from the **CarePulse Bee link** card in the Alexa app (or the console's card output).
+3. **Start the Bee proxy.** Enable Developer Mode in the Bee iOS app (tap the app version five times), then:
+   ```
+   npm install -g @beeai/cli
+   bee login
+   bee proxy
+   ```
+   Keep this terminal open and note the URL it prints.
+4. **Find your speaker label** (in a second terminal):
+   ```
+   node scripts/bee_bridge.js --bee-url <proxy-url> --list-speakers
+   ```
+5. **Preview, then send:**
+   ```
+   node scripts/bee_bridge.js --bee-url <proxy-url> --wearer-speaker <your-label>
+   CAREPULSE_MCP_KEY=<key> node scripts/bee_bridge.js --bee-url <proxy-url> --wearer-speaker <your-label> --mcp-url <endpoint>/mcp --link-code <code> --send
+   ```
+   On Windows PowerShell, set the key first with `$env:CAREPULSE_MCP_KEY="<key>"`. Re-running is safe: already-sent items are skipped.
+6. **Check the result.** Say "ask care pulse for my wellness summary". On a screen device the Wellness Snapshot card shows a Bee 🐝 badge on Bee-derived signals.
+7. **Clean up.** Say "ask care pulse to unlink my Bee" and answer "yes" to revoke consent and delete Bee-derived signals.
+
+If Bee returns a shape the bridge does not recognize, it stops and asks for `node scripts/bee_schema_report.js <file.json>`, which prints field names and types only, never values.
+
+### Known limitations
+
+- The bridge runs on the member's computer because Bee's proxy is local and for development only. There is no hosted Bee connector or Alexa account linking yet.
+- Bee does not document its conversation schema. The bridge finds `utterances` anywhere in a conversation and uses `speaker` labels; verify with `--list-speakers` before sending. Only the first page of facts and conversations is read.
+- Bee's API does not document sleep or health data; `healthKit.sleepHours` must come from another source.
+- Signal detection is English keyword matching and does not handle negation ("not tired").
+- The MCP API key is still shared; the link code limits which member a caller can write to, not who may call.
 
 ## Privacy Blueprint and Security
 
@@ -103,7 +186,7 @@ The live MCP server currently exposes seven tools: `get_care_context`, `log_well
 
 The DynamoDB table enables TTL on the numeric `expiresAt` attribute. Consent checks also compare `expiresAt` with the current time before allowing a disclosure, so an expired record is denied by application policy even if DynamoDB has not physically deleted it yet.
 
-**The requested 24-hour consent TTL is not the current default.** `request_consent` currently sets consent expiry to 36 hours. MCP sessions expire after one hour. DynamoDB TTL deletion is asynchronous: it is not an exact-time deletion guarantee and must not be described as erasing every trace at 24 hours. Wellness events and care-context records do not currently have TTL values. The CloudFormation table has `DeletionPolicy: Retain` and point-in-time recovery enabled.
+**The requested 24-hour consent TTL is not the current default.** `request_consent` currently sets consent expiry to 36 hours. MCP sessions expire after one hour. DynamoDB TTL deletion is asynchronous: it is not an exact-time deletion guarantee and must not be described as erasing every trace at 24 hours. Voice-reported wellness events and care-context records do not currently have TTL values; Bee-derived events expire after 90 days, and Bee consent after 30 days. The CloudFormation table has `DeletionPolicy: Retain` and point-in-time recovery enabled.
 
 ### Minimum Disclosure and Operational Boundaries
 

@@ -81,6 +81,54 @@ const MCP_TOOLS = [
             consentId: { type: 'string' },
             authorized: { type: 'boolean' }
         }, ['ownerId', 'memberName', 'caregiverName', 'signal', 'followupStatus', 'consentId', 'authorized'])
+    },
+    {
+        name: 'ingest_bee_context',
+        description: 'Derive wellness signals from a consented Bee export. Requires the link code the member received when authorizing Bee in CarePulse. Only the wearer\'s own utterances and confirmed facts are analyzed; transcripts are never stored.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                linkCode: { type: 'string', description: 'Code shown in the Alexa app after the member says "link my Bee".' },
+                beeExport: {
+                    type: 'object',
+                    properties: {
+                        exportedAt: { type: 'string', format: 'date-time' },
+                        facts: {
+                            type: 'array',
+                            items: {
+                                type: 'object',
+                                properties: { text: { type: 'string' }, confirmed: { type: 'boolean' } }
+                            }
+                        },
+                        conversations: {
+                            type: 'array',
+                            items: {
+                                type: 'object',
+                                properties: {
+                                    utterances: {
+                                        type: 'array',
+                                        items: {
+                                            type: 'object',
+                                            properties: {
+                                                speaker: { type: 'string', enum: ['wearer', 'other'] },
+                                                text: { type: 'string' }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        healthKit: {
+                            type: 'object',
+                            properties: { sleepHours: { type: 'number', minimum: 0, maximum: 24 } }
+                        }
+                    },
+                    required: ['exportedAt']
+                }
+            },
+            required: ['linkCode', 'beeExport'],
+            additionalProperties: false
+        }
     }
 ];
 

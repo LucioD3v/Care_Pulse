@@ -6,14 +6,16 @@ const CARD_TITLES = {
     wellness: 'CarePulse report',
     followup: 'CarePulse follow-up',
     summary: 'CarePulse summary',
-    permission: 'CarePulse permission'
+    permission: 'CarePulse permission',
+    beeLink: 'CarePulse Bee link'
 };
 
 const CARD_CONTENT = {
     wellness: (memberName, signal, summary) => `${memberName}: ${signal}\n${summary}`,
     followup: (memberName, status, alertStatus) => `${memberName}\nFollow-up: completed\nStatus: ${status}\nCare Circle: ${alertStatus}`,
     summary: (memberName, timeframe, snapshot, signals) => `${memberName} · ${timeframe}\nStatus: ${snapshot.status}\nSignals: ${signals}\nFollow-up: ${snapshot.followup}`,
-    permission: (caregiverName, signal) => `Shared with: ${caregiverName}\nOnly if: ${signal} repeats\nScope: this follow-up only`
+    permission: (caregiverName, signal) => `Shared with: ${caregiverName}\nOnly if: ${signal} repeats\nScope: this follow-up only`,
+    beeLink: (linkCode, days) => `Link code: ${linkCode}\nKeep it private and use it only with your own Bee account.\nUsed: only your own words and facts you confirmed in Bee\nStored: wellness signals only, never recordings or transcripts\nExpires in: ${days} days\nTo stop and delete Bee data, say: unlink my Bee`
 };
 
 const ALERT_STATUS = {
@@ -56,7 +58,14 @@ const COPY = {
     preferenceInvalidTime: 'Please say a specific time, such as eight PM.',
     preferenceSaved: parts => `Saved your preferences: ${parts.join(', ')}.`,
     reportSavedWithoutOffer: observation => /^I recorded\b/i.test(observation) ? observation : `I saved your report. ${observation}`,
-    preferenceTime: time => `follow-ups at ${spokenTime(time)}`
+    preferenceTime: time => `follow-ups at ${spokenTime(time)}`,
+    beeConsentQuestion: days => `Before I use your Bee data, here is what that means. CarePulse will look only at things you said yourself and facts you confirmed in Bee, to notice signals like tiredness or low mood. What other people say is ignored. I keep only those signals, never recordings or transcripts. This permission lasts ${days} days, and you can say unlink my Bee at any time to remove it and delete that data. Do you authorize CarePulse to use your Bee data?`,
+    beeConsentSaved: 'Done. I sent your Bee link code to the Alexa app. Keep it private and use it only with your own Bee account.',
+    beeConsentDeclined: 'Okay. I will not use any Bee data.',
+    beeUnlinkQuestion: 'This stops CarePulse from using your Bee data and deletes the wellness signals that came from Bee. Your voice reports stay. Do you want to continue?',
+    beeUnlinked: count => `Done. Bee is unlinked, and I deleted ${count} ${count === 1 ? 'wellness signal' : 'wellness signals'} that came from Bee.`,
+    beeNothingToRemove: 'Bee is not linked to CarePulse, and there is no Bee data to remove.',
+    beeUnlinkCancelled: 'Okay. Bee stays linked.'
 };
 
 module.exports = { CARD_TITLES, CARD_CONTENT, ALERT_STATUS, COPY };
