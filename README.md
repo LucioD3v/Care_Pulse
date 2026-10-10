@@ -100,7 +100,7 @@ The live MCP server currently exposes eight tools: `get_care_context`, `log_well
 ## Bee Wearable Ingestion (Preview)
 
 > [!NOTE]
-> **Preview.** CarePulse can receive Bee-derived context through MCP, gated by the member's voice consent, and show it on the Wellness Snapshot card. CarePulse does **not** call Bee's API yet: a caller must fetch Bee data and translate it into the input format below. Bee's real response fields are still being mapped.
+> **Preview.** CarePulse can receive Bee-derived context through MCP, gated by the member's voice consent, and show it on the Wellness Snapshot card. The included bridge script (`scripts/bee_bridge.js`) reads Bee data on the member's computer through Bee's local developer proxy and sends it in the input format below; there is no hosted Bee connector yet.
 
 ### Flow
 
@@ -144,19 +144,38 @@ Bee app ──► Bee CLI / API ──► caller maps data ──► MCP tools/c
 
 Response: `{ success, eventsIngested, signalsDetected, skipped, ignored: { unconfirmedFacts, otherSpeakerUtterances }, errors }`.
 
-### Mapping real Bee data
+### Testing with a real Bee account
 
-Bee developer access requires Developer Mode in the Bee iOS app (tap the app version five times), then `npm install -g @beeai/cli`, `bee login`, and `bee proxy`. To share the shape of real responses without exposing their content:
+`scripts/bee_bridge.js` reads the member's data from the local Bee proxy and sends it to CarePulse. It has no dependencies (Node.js 22+), never prints spoken text, and only sends confirmed facts and lines spoken by the wearer.
 
-```
-node scripts/bee_schema_report.js facts.json conversations.json
-```
+1. **Deploy this branch** and rebuild the interaction model so `LinkBeeIntent` and `UnlinkBeeIntent` exist. Note the MCP endpoint URL (ending in `/mcp`) and the `MCP_API_KEY`.
+2. **Link Bee by voice.** In the Alexa Developer Console (Test tab) or on an Echo, say "ask care pulse to link my Bee" and answer "yes". Copy the code from the **CarePulse Bee link** card in the Alexa app (or the console's card output).
+3. **Start the Bee proxy.** Enable Developer Mode in the Bee iOS app (tap the app version five times), then:
+   ```
+   npm install -g @beeai/cli
+   bee login
+   bee proxy
+   ```
+   Keep this terminal open and note the URL it prints.
+4. **Find your speaker label** (in a second terminal):
+   ```
+   node scripts/bee_bridge.js --bee-url <proxy-url> --list-speakers
+   ```
+5. **Preview, then send:**
+   ```
+   node scripts/bee_bridge.js --bee-url <proxy-url> --wearer-speaker <your-label>
+   CAREPULSE_MCP_KEY=<key> node scripts/bee_bridge.js --bee-url <proxy-url> --wearer-speaker <your-label> --mcp-url <endpoint>/mcp --link-code <code> --send
+   ```
+   On Windows PowerShell, set the key first with `$env:CAREPULSE_MCP_KEY="<key>"`. Re-running is safe: already-sent items are skipped.
+6. **Check the result.** Say "ask care pulse for my wellness summary". On a screen device the Wellness Snapshot card shows a Bee 🐝 badge on Bee-derived signals.
+7. **Clean up.** Say "ask care pulse to unlink my Bee" and answer "yes" to revoke consent and delete Bee-derived signals.
 
-The script prints field names and types only, never values.
+If Bee returns a shape the bridge does not recognize, it stops and asks for `node scripts/bee_schema_report.js <file.json>`, which prints field names and types only, never values.
 
 ### Known limitations
 
-- No Bee connector yet; CarePulse holds no Bee credentials. Bee's local proxy is for development only.
+- The bridge runs on the member's computer because Bee's proxy is local and for development only. There is no hosted Bee connector or Alexa account linking yet.
+- Bee does not document its conversation schema. The bridge finds `utterances` anywhere in a conversation and uses `speaker` labels; verify with `--list-speakers` before sending. Only the first page of facts and conversations is read.
 - Bee's API does not document sleep or health data; `healthKit.sleepHours` must come from another source.
 - Signal detection is English keyword matching and does not handle negation ("not tired").
 - The MCP API key is still shared; the link code limits which member a caller can write to, not who may call.
