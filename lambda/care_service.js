@@ -310,7 +310,8 @@ async function callTool(name, input) {
         compare_with_baseline: compareWithBaseline,
         create_followup: createFollowup,
         request_consent: requestConsent,
-        send_caregiver_alert: sendCaregiverAlert
+        send_caregiver_alert: sendCaregiverAlert,
+        ingest_bee_context: (input) => require('./tools/ingestBeeContext').ingestBeeContext(input)
     };
     if (!handlers[name]) {
         throw new Error(`Unknown MCP tool: ${name}`);
