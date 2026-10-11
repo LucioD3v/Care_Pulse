@@ -72,6 +72,26 @@ async function queryPrefix(pk, prefix, limit = 100) {
         .slice(0, limit);
 }
 
+async function queryAllPrefix(pk, prefix) {
+    const tableName = process.env.CARE_TABLE_NAME;
+    if (!tableName) {
+        return mockRecords.filter(record => record.pk === pk && record.sk.startsWith(prefix));
+    }
+    const items = [];
+    let exclusiveStartKey;
+    do {
+        const result = await dynamoClient.send(new QueryCommand({
+            TableName: tableName,
+            KeyConditionExpression: 'pk = :pk AND begins_with(sk, :prefix)',
+            ExpressionAttributeValues: { ':pk': pk, ':prefix': prefix },
+            ExclusiveStartKey: exclusiveStartKey
+        }));
+        items.push(...(result.Items || []));
+        exclusiveStartKey = result.LastEvaluatedKey;
+    } while (exclusiveStartKey);
+    return items;
+}
+
 async function updateRecord(pk, sk, values) {
     const tableName = process.env.CARE_TABLE_NAME;
     if (tableName) {
@@ -136,6 +156,7 @@ module.exports = {
     putRecord,
     putRecordIfAbsent,
     queryPrefix,
+    queryAllPrefix,
     updateRecord,
     getRecord,
     deleteRecord,

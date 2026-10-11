@@ -84,12 +84,11 @@ const MCP_TOOLS = [
     },
     {
         name: 'ingest_bee_context',
-        description: 'Ingest a Bee wearable export, extract wellness signals from text and healthKit data, and persist them as wellness events.',
+        description: 'Derive wellness signals from a consented Bee export. Requires the link code the member received when authorizing Bee in CarePulse. Only the wearer\'s own utterances and confirmed facts are analyzed; transcripts are never stored.',
         inputSchema: {
             type: 'object',
             properties: {
-                ownerId: { type: 'string' },
-                memberName: { type: 'string' },
+                linkCode: { type: 'string', description: 'Code shown in the Alexa app after the member says "link my Bee".' },
                 beeExport: {
                     type: 'object',
                     properties: {
@@ -98,14 +97,25 @@ const MCP_TOOLS = [
                             type: 'array',
                             items: {
                                 type: 'object',
-                                properties: { content: { type: 'string' } }
+                                properties: { text: { type: 'string' }, confirmed: { type: 'boolean' } }
                             }
                         },
                         conversations: {
                             type: 'array',
                             items: {
                                 type: 'object',
-                                properties: { summary: { type: 'string' } }
+                                properties: {
+                                    utterances: {
+                                        type: 'array',
+                                        items: {
+                                            type: 'object',
+                                            properties: {
+                                                speaker: { type: 'string', enum: ['wearer', 'other'] },
+                                                text: { type: 'string' }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         },
                         healthKit: {
@@ -116,7 +126,7 @@ const MCP_TOOLS = [
                     required: ['exportedAt']
                 }
             },
-            required: ['ownerId', 'memberName', 'beeExport'],
+            required: ['linkCode', 'beeExport'],
             additionalProperties: false
         }
     }

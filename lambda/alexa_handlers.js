@@ -14,11 +14,14 @@ const { renderVoiceObservation } = require('./voice_agent');
 const { escapeSsml, localDateTime, addOneDay } = require('./voice_format');
 const { CARD_TITLES, CARD_CONTENT, ALERT_STATUS, COPY } = require('./voice_copy');
 const { createGetWellnessSummaryHandler } = require('./handlers/getWellnessSummaryHandler');
+const { grantBeeConsent, revokeBeeConsent, consentDays } = require('./bee_link');
 
 const STATES = {
     AWAITING_FOLLOWUP_CONFIRMATION: 'AWAITING_FOLLOWUP_CONFIRMATION',
     AWAITING_CONSENT_CONFIRMATION: 'AWAITING_CONSENT_CONFIRMATION',
-    AWAITING_FOLLOWUP_STATUS: 'AWAITING_FOLLOWUP_STATUS'
+    AWAITING_FOLLOWUP_STATUS: 'AWAITING_FOLLOWUP_STATUS',
+    AWAITING_BEE_CONSENT: 'AWAITING_BEE_CONSENT',
+    AWAITING_BEE_UNLINK_CONFIRMATION: 'AWAITING_BEE_UNLINK_CONFIRMATION'
 };
 
 function getSlotValue(handlerInput, slotName) {
@@ -347,6 +350,37 @@ const SetCarePreferencesIntentHandler = {
     }
 };
 
+const LinkBeeIntentHandler = {
+    canHandle(handlerInput) {
+        return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
+            && Alexa.getIntentName(handlerInput.requestEnvelope) === 'LinkBeeIntent';
+    },
+    handle(handlerInput) {
+        saveConversationState(handlerInput, {
+            conversationState: STATES.AWAITING_BEE_CONSENT,
+            memberName: defaultMemberName()
+        });
+        const prompt = COPY.beeConsentQuestion(consentDays());
+        speakText(handlerInput, prompt);
+        return repromptText(handlerInput, 'Do you authorize CarePulse to use your Bee data?').getResponse();
+    }
+};
+
+const UnlinkBeeIntentHandler = {
+    canHandle(handlerInput) {
+        return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
+            && Alexa.getIntentName(handlerInput.requestEnvelope) === 'UnlinkBeeIntent';
+    },
+    handle(handlerInput) {
+        saveConversationState(handlerInput, {
+            conversationState: STATES.AWAITING_BEE_UNLINK_CONFIRMATION,
+            memberName: defaultMemberName()
+        });
+        speakText(handlerInput, COPY.beeUnlinkQuestion);
+        return repromptText(handlerInput, COPY.beeUnlinkQuestion).getResponse();
+    }
+};
+
 const YesIntentHandler = {
     canHandle(handlerInput) {
         return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
@@ -354,6 +388,19 @@ const YesIntentHandler = {
     },
     async handle(handlerInput) {
         const attributes = sessionAttributes(handlerInput);
+        if (attributes.conversationState === STATES.AWAITING_BEE_CONSENT) {
+            const { linkCode } = await grantBeeConsent({ ownerId: ownerId(handlerInput), memberName: attributes.memberName });
+            saveConversationState(handlerInput, { conversationState: null });
+            return speakText(handlerInput, COPY.beeConsentSaved)
+                .withSimpleCard(CARD_TITLES.beeLink, CARD_CONTENT.beeLink(linkCode, consentDays()))
+                .getResponse();
+        }
+        if (attributes.conversationState === STATES.AWAITING_BEE_UNLINK_CONFIRMATION) {
+            const { revoked, eventsDeleted } = await revokeBeeConsent({ ownerId: ownerId(handlerInput), memberName: attributes.memberName });
+            saveConversationState(handlerInput, { conversationState: null });
+            const speech = revoked || eventsDeleted ? COPY.beeUnlinked(eventsDeleted) : COPY.beeNothingToRemove;
+            return speakText(handlerInput, speech).getResponse();
+        }
         if (attributes.conversationState === STATES.AWAITING_FOLLOWUP_CONFIRMATION) {
             const followup = await ensureFollowup(handlerInput, {
                 memberName: attributes.memberName,
@@ -393,6 +440,10 @@ const NoIntentHandler = {
     },
     handle(handlerInput) {
         const state = sessionAttributes(handlerInput).conversationState;
+        if (state === STATES.AWAITING_BEE_CONSENT || state === STATES.AWAITING_BEE_UNLINK_CONFIRMATION) {
+            saveConversationState(handlerInput, { conversationState: null });
+            return speakText(handlerInput, state === STATES.AWAITING_BEE_CONSENT ? COPY.beeConsentDeclined : COPY.beeUnlinkCancelled).getResponse();
+        }
         if (state === STATES.AWAITING_FOLLOWUP_CONFIRMATION) {
             return speakText(handlerInput, COPY.followupDeclined).getResponse();
         }
@@ -474,6 +525,8 @@ exports.handler = Alexa.SkillBuilders.custom()
         CompleteFollowupIntentHandler,
         GetWellnessSummaryIntentHandler,
         SetCarePreferencesIntentHandler,
+        LinkBeeIntentHandler,
+        UnlinkBeeIntentHandler,
         YesIntentHandler,
         NoIntentHandler,
         EmergencyGuidanceIntentHandler,
