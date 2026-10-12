@@ -23,7 +23,7 @@ CarePulse is not a medical device, does not diagnose, and is not an emergency se
 
 ## Voice Conversation: Judge Demo
 
-The interaction model is `en-US`. This is the representative seeded Elena/Laura conversation contributed by the team. The seed creates two recent tiredness reports and three nights of sleep below Elena's 7.5-hour baseline, so the example observation has supporting demo data. Bedrock may paraphrase that observation; the consent and follow-up turns are driven by the application handlers.
+The interaction model is `en-US`. This is the representative seeded Elena/Laura conversation contributed by the team. The seed creates two recent tiredness reports and three nights of sleep below Elena's 7.5-hour baseline, so the example observation has supporting demo data. The dialogue below is illustrative; current wording uses deterministic observations and approved templates selected by Bedrock when available. Consent and follow-up turns are driven by the application handlers.
 
 ```text
 Elena: Alexa, open CarePulse.
@@ -61,7 +61,7 @@ For the emergency-safety demo, say **“I have chest pain”** or **“I cannot 
 1. The member reports a wellness signal, such as unusual tiredness or reduced sleep.
 2. The Alexa ASK SDK handler derives a pseudonymous owner key, loads the member's care context, records the event, and calls `compare_with_baseline`.
 3. The current comparison is deterministic: it looks for repeated signals and sleep below the stored routine. It describes an observed change without diagnosing.
-4. When configured, AWS Bedrock rewrites those facts as a short, voice-first observation. Bedrock is not the triage policy engine.
+4. When configured, AWS Bedrock selects an approved voice template within a bounded timeout. The application supplies the facts; free-form model output cannot change them.
 5. Alexa asks whether to create a follow-up. It then asks whether the member authorizes a named caregiver to receive a brief alert only if the same signal is reported at that follow-up. The consent record is written only after an affirmative response.
 
 ![Moment 1 architecture: wellness report, baseline, and scoped consent](docs/momento1_architecture.svg)
@@ -88,7 +88,7 @@ The following six names describe the requested target tool contract. The **Curre
 | :--- | :--- | :--- | :--- |
 | `get_care_context` | `user_id` | Retrieve care context, routine, caregiver, and relevant history from DynamoDB. | Implemented under this name; input is `ownerId, memberName`. |
 | `log_wellness_event` | `user_id, symptom, state, ttl` | Record a wellness event in DynamoDB. | Implemented; input is `ownerId, memberName, signal, state` plus optional details. Event records do not currently receive a TTL. |
-| `compare_with_baseline` | `current_event, baseline_data` | Compare recent signals with the member's routine; use structured results for the voice experience. | Implemented with deterministic logic using `ownerId, memberName, signal`; Bedrock only renders voice wording. |
+| `compare_with_baseline` | `current_event, baseline_data` | Compare recent signals with the member's routine; use structured results for the voice experience. | Implemented with deterministic logic using `ownerId, memberName, signal`; Bedrock only selects approved voice wording. |
 | `store_scoped_consent` | `token, rules, ttl_24h` | Persist explicit, narrow permission with a 24-hour expiration. | Consent behavior is implemented as `request_consent`; current default expiry is **36 hours**, not 24. |
 | `trigger_emergency_alert` | `user_id, alert_type` | Proposed red-flag override route to an emergency notification policy and SNS. | **Not exposed or implemented.** Emergency guidance only tells the user to contact emergency services. |
 | `send_caregiver_alert` | `user_id, caregiver_id, summary` | Publish a minimum-data notification to the authorized caregiver through SNS. | Alexa calls it after its consent policy allows it. The MCP tool currently trusts caller-provided `authorized` and `consentId`; it does not independently revalidate consent for direct MCP calls. |
@@ -193,8 +193,8 @@ The DynamoDB table enables TTL on the numeric `expiresAt` attribute. Consent che
 - Caregiver alerts contain a brief signal summary and a request to check in; they do not include the member's full wellness history or sleep metrics.
 - Consent is scoped to the member, caregiver, signal, and follow-up. A `same` or `worse` response alone is insufficient to authorize sharing.
 - Alexa user IDs are hashed into an owner key outside demo mode. `DEMO_OWNER_ID` deliberately overrides that isolation for a repeatable hackathon seed; do not use a shared demo owner for unrelated real users.
-- The Alexa tool trace currently logs the pseudonymous owner key and `memberName` to CloudWatch. Review or mask this field before using real identities; do not log symptom details or consent tokens.
-- DynamoDB server-side encryption and point-in-time recovery are enabled. SNS uses the AWS-managed SNS KMS key. The HTTP MCP endpoint requires an API key and compares it in constant time.
+- Runtime logs emit aggregate metrics and a Lambda correlation ID, without member names, owner IDs, report bodies, consent IDs, or raw dependency errors.
+- DynamoDB server-side encryption and point-in-time recovery are enabled. SNS uses a retained customer-managed KMS key with scoped publisher permissions. The HTTP MCP endpoint requires an API key and compares it in constant time.
 - The MCP API key is shared across clients and is not bound to an `ownerId`. The Alexa request path checks the consent policy before invoking the alert tool, but a direct MCP caller with the API key can supply `authorized: true` and a non-empty `consentId`; the tool does not currently re-read or validate that consent record. Restrict the key to trusted test operators until authorization is enforced inside the server-side tool.
 - SNS acceptance confirms that SNS accepted a publish request; it does not prove that a caregiver received or read the notification.
 
@@ -243,7 +243,7 @@ flowchart LR
     skill -->|Report: load context and record event| tools[Shared care_service.js<br/>in-process]
     tools -->|Read/write context, events, follow-ups, consent| table[(DynamoDB care table)]
     tools -->|Compare recent signals with routine| baseline[Deterministic baseline policy]
-    baseline -->|Structured facts only| voice[Bedrock Converse<br/>voice wording only]
+    baseline -->|Approved template choice| voice[Bedrock Converse<br/>optional style selection]
     voice -->|Short response; no policy decision| skill
     skill -->|Yes: create follow-up, then ask consent| tools
     tools -->|Persist scoped consent after Yes| table
@@ -271,7 +271,7 @@ flowchart LR
 
 **Important timing detail:** the follow-up is stored with a due time (default 6:00 PM in the member's time zone). No Lambda schedule or Alexa proactive event wakes the user at that time. The next skill launch after the due time prompts for a status. A `better` response closes without an alert; `same` or `worse` proceeds to the Alexa-side consent policy, and SNS is called only if that policy allows sharing.
 
-Bedrock is required in the deployed Alexa runtime (`REQUIRE_BEDROCK=true`) and uses the Converse API to render voice copy from structured comparison facts. It does not decide urgency, consent, or alert delivery. CloudWatch retains logs for 14 days. DynamoDB uses on-demand billing, point-in-time recovery, server-side encryption, TTL on `expiresAt`, and a retain-on-stack-removal policy. Consent currently expires after 36 hours by default; DynamoDB TTL cleanup is asynchronous.
+Bedrock is optional and uses the Converse API to select approved wording within a default 1.2-second timeout. Deterministic copy remains available on timeout, invalid output, or service failure. It does not decide urgency, consent, or alert delivery. CloudWatch retains logs for 14 days. DynamoDB uses on-demand billing, point-in-time recovery, server-side encryption, TTL on `expiresAt`, and a retain-on-stack-removal policy. Consent currently expires after 36 hours by default; DynamoDB TTL cleanup is asynchronous.
 
 > [!WARNING]
 > The standalone MCP gateway currently authenticates with a shared API key but does not bind the caller to an `ownerId` or independently revalidate consent for direct `send_caregiver_alert` calls. The consent decision shown in the Alexa path is enforced by Alexa orchestration. Restrict the MCP key to trusted demo clients until authorization is enforced at the tool boundary.
@@ -284,7 +284,7 @@ Bedrock is required in the deployed Alexa runtime (`REQUIRE_BEDROCK=true`) and u
 - AWS CLI v2 authenticated to the target AWS account.
 - Serverless Framework 4 (`npx serverless@4` is used below).
 - An Alexa custom skill in the Alexa Developer Console and its Skill ID.
-- Access to a Bedrock Converse-compatible model in the deployment region.
+- Optional access to a Bedrock Converse-compatible model, with its exact allowed resource ARNs.
 - An authorized caregiver email or phone number for the SNS subscription test.
 
 Python 3.10+ and the ASK CLI are not required by this repository's current runtime or deployment path. The skill interaction model is uploaded through the Alexa Developer Console.
@@ -293,24 +293,41 @@ Verify AWS credentials and install/test the Lambda package:
 
 ```sh
 aws sts get-caller-identity
-npm install --prefix lambda
+npm ci --prefix lambda
 npm test --prefix lambda
 ```
 
-The `npm test` command runs the maintained CarePulse conversation and MCP suite. Legacy local files from the earlier vitals prototype are outside the current deployment and test path.
+The `npm test` command runs all suites: conversations, MCP contracts, persistence, time zones, dependency failures, infrastructure configuration, and the SDK v3 vitals adapter.
 
 ### Environment and Deployment Parameters
 
 | Setting | Source / purpose |
 | :--- | :--- |
-| `AWS_REGION` | Serverless `--region`; AWS SDK clients use the Lambda region. |
+| `AWS_REGION` | Fallback for Serverless `--region`; defaults to `us-east-1`. AWS SDK clients use the deployed Lambda region. |
 | `CARE_TABLE_NAME` | Set from the `CarePulseTable` CloudFormation resource. The code does not use `DYNAMODB_TABLE_NAME`. |
-| `BEDROCK_MODEL_ID` | Required Serverless parameter `bedrockModelId`; model must support Converse in this region. |
+| `BEDROCK_MODEL_ID` | Optional `bedrockModelId`; uses deterministic wording when absent or unavailable. |
+| `BEDROCK_RESOURCE_ARNS` | Fallback for `bedrockResourceArns`: exact comma-separated model/profile ARNs allowed for the Alexa role; supply when enabling Bedrock. |
+| `OPERATIONS_ALARM_TOPIC_ARN` | Fallback for `operationsAlarmTopicArn`: optional operations SNS topic for CloudWatch alarm actions. |
 | `SNS_TOPIC_ARN` | Set from the `CaregiverAlertsTopic` resource. Subscribe and confirm caregiver endpoints separately. |
-| `MCP_API_KEY` | Required deployment parameter for the HTTP MCP gateway; keep it in a secret store or local environment variable. |
+| `MCP_API_KEY` | Required gateway key. Resolution order: `mcpApiKey` parameter, `MCP_API_KEY`, then `CAREPULSE_MCP_KEY` when the preceding variable is undefined. |
+| `ALEXA_SKILL_ID` | Fallback for the required `alexaSkillId` parameter; used by the Alexa trigger and SDK validation. |
+| `MCP_ALLOWED_ORIGINS` | Optional comma-separated allowed browser origins; fallback for `mcpAllowedOrigins`. |
+| `VOICE_TIMEOUT_MS` | Optional model response timeout; fallback for `voiceTimeoutMs`, default `1200`. |
+| `DEFAULT_MEMBER_NAME`, `DEFAULT_CAREGIVER_NAME`, `DEFAULT_TIME_ZONE` | Fallbacks for `defaultMemberName`, `defaultCaregiverName`, and `timeZone`; retain Elena, Laura, and America/Mexico_City defaults. |
+| `DEFAULT_BASELINE_SLEEP_HOURS` | Fallback for `baselineSleepHours`; applies only to the explicitly configured demo owner. Empty by default; the previous `8.0` default is retained as a comment in the environment reference. |
 | `DEMO_OWNER_ID` | Optional shared demo owner for repeatable seed data; omit for per-Alexa-user hashed owner IDs. |
 
-Deploy from the repository root. Supply the Alexa Skill ID, Bedrock model ID, and a long random MCP key through your shell or deployment secret manager; do not commit the key.
+The root `.env` and `.env.example` contain a deployment reference alongside the existing local settings. Keep existing local values when updating either file. For a new checkout, copy `.env.example` to `.env` only if `.env` does not already exist. Fill `ALEXA_SKILL_ID` and `MCP_API_KEY`; leave optional Bedrock values empty or configure both the model ID and exact resource ARNs.
+
+For separate environments, keep a complete configuration in `.env.dev`, `.env.qa`, or `.env.prod` and select it with `--stage dev`, `--stage qa`, or `--stage prod`. These files are ignored by Git; only `.env.example` is versioned. Serverless v4 loads dotenv files automatically, and the explicit `env:` fallbacks in this service expose only the selected settings to Lambda. See the [Serverless environment-variable documentation](https://www.serverless.com/framework/docs/guides/variables/env-vars).
+
+Deploy from the repository root after filling the selected environment file:
+
+```sh
+npx serverless@4 deploy --stage dev
+```
+
+Existing deployment parameters remain supported and take precedence over the new environment fallbacks. The example below uses shell variables for explicit overrides; dotenv loading inside Serverless does not expand a shell's `$CAREPULSE_MCP_KEY`. Export that shell variable first if using this form:
 
 ```sh
 npx serverless@4 deploy \
@@ -319,6 +336,7 @@ npx serverless@4 deploy \
   --param="alexaSkillId=amzn1.ask.skill.REPLACE_ME" \
   --param="mcpApiKey=$CAREPULSE_MCP_KEY" \
   --param="bedrockModelId=YOUR_BEDROCK_MODEL_ID" \
+  --param="bedrockResourceArns=YOUR_EXACT_MODEL_OR_PROFILE_ARNS" \
   --param="demoOwnerId=hackathon-demo"
 ```
 
@@ -339,7 +357,7 @@ This is the actual ASK SDK conversation flow, split into setup and a later check
 | Console input | What the handler does | Expected next response |
 | :--- | :--- | :--- |
 | `open CarePulse` | Starts the custom Alexa Skill. | Welcome prompt. |
-| `I feel more tired than usual` | `ReportWellnessIntent` records the signal and compares it with recent reports and routine. | Bedrock-rendered observation, then asks whether to check in at 6 PM unless suggestions are off. |
+| `I feel more tired than usual` | `ReportWellnessIntent` records the signal and compares it with recent reports and routine. | Deterministic observation with approved wording, then asks whether to check in at 6 PM unless suggestions are off. |
 | `Yes` | Confirms the follow-up and creates it for 6:00 PM. | Confirms the schedule, then asks whether Laura may receive a narrowly scoped alert. |
 | `Yes` | `AMAZON.YesIntent` stores consent for that signal and follow-up only. | Confirms the scope of permission. |
 
@@ -360,7 +378,7 @@ The ASK skill supports English (US) preference commands: `use short summaries`, 
 
 On an APL-capable device, an explicit summary request includes a simple dashboard with the latest report from the last 30 days, the next stored follow-up, and the active permission for the default caregiver on that follow-up. The summary remains fully usable by voice without APL. The interface is declared in `skill-package/skill.json`; enable it in the Developer Console as well if updating the skill there manually. This dashboard is part of the ASK experience, not a registered Alexa+ MCP App UI. See [Amazon's ASK APL integration guide](https://developer.amazon.com/en-US/docs/alexa/alexa-presentation-language/use-apl-with-ask-sdk.html).
 
-If the Skill does not respond as expected, verify that the interaction model built successfully, the `AlexaLambdaArn` and region are correct under **Build → Endpoint**, and the stage is **Development**. Then inspect the `alexaSkill` Lambda logs in CloudWatch. The deployed voice flow requires `BEDROCK_MODEL_ID` and access to that model in the selected region.
+If the Skill does not respond as expected, verify that the interaction model built successfully, the `AlexaLambdaArn` and region are correct under **Build → Endpoint**, and the stage is **Development**. Then inspect the `alexaSkill` Lambda logs in CloudWatch. Voice remains available without Bedrock. Inspect `VoiceFallbacks` to diagnose optional model failures.
 
 Initialize the MCP protocol session (replace the endpoint and key with deployment values):
 
@@ -372,7 +390,7 @@ curl -i "$CAREPULSE_MCP_ENDPOINT" \
   --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"carepulse-demo","version":"1.0.0"}}}'
 ```
 
-The response includes `Mcp-Session-Id`. Pass that header on `tools/list` and `tools/call` requests. The MCP gateway and Alexa skill share the same DynamoDB-backed tools.
+The response includes `Mcp-Session-Id` and the negotiated protocol version. Send `notifications/initialized` before calling tools, and include the session and `Mcp-Protocol-Version` headers on subsequent requests. History results now contain `events`, `period`, and `nextCursor`; follow the cursor for additional pages. See [the MCP contract and operations guide](docs/development-operations.md#mcp-contract).
 
 ### Seed Demo Data
 
@@ -390,6 +408,8 @@ npm run seed:demo
 > A live proactive 6:00 PM voice prompt and the emergency SNS override are future work. The current judge demo simulates the later interaction by reopening the skill after the stored due time.
 
 ## Tests and Operations
+
+See [development changes and operations](docs/development-operations.md) for the request budget, comparison rules, index backfill, role permissions, metrics, and notification failure procedure.
 
 Run the suite:
 
@@ -411,7 +431,8 @@ npx serverless@4 package \
   --region us-east-1 \
   --param="alexaSkillId=amzn1.ask.skill.REPLACE_ME" \
   --param="mcpApiKey=$CAREPULSE_MCP_KEY" \
-  --param="bedrockModelId=YOUR_BEDROCK_MODEL_ID"
+  --param="bedrockModelId=YOUR_BEDROCK_MODEL_ID" \
+  --param="bedrockResourceArns=YOUR_EXACT_MODEL_OR_PROFILE_ARNS"
 ```
 
 To remove the compute stack after the event, use `npx serverless@4 remove` with the same stage, region, Skill ID, MCP key, and Bedrock model parameters used during deployment. The DynamoDB table is retained; review and delete it separately only when retention requirements permit.

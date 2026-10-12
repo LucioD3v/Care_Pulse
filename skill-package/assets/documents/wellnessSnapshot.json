@@ -25,7 +25,7 @@
                 { "name": "label",            "type": "string",  "default": "" },
                 { "name": "value",            "type": "string",  "default": "No data" },
                 { "name": "intensityPercent", "type": "number",  "default": 0 },
-                { "name": "statusColor",      "type": "color",   "default": "@colorBrandPrimary" },
+                { "name": "statusColor",      "type": "color",   "default": "@colorTextSecondary" },
                 { "name": "source",           "type": "string",  "default": "" }
             ],
             "item": {
@@ -113,64 +113,108 @@
             "items": [
                 {
                     "type": "AlexaHeader",
-                    "headerTitle": "Family Wellness Snapshot",
+                    "headerTitle": "CarePulse",
                     "headerSubtitle": "${wellnessData.memberName} · ${wellnessData.timeframe}"
                 },
                 {
-                    "type": "Container",
+                    "type": "ScrollView",
                     "grow": 1,
-                    "paddingLeft": "${@viewportProfile == 'hubLandscapeSmall' ? 20 : 48}",
-                    "paddingRight": "${@viewportProfile == 'hubLandscapeSmall' ? 20 : 48}",
-                    "paddingTop": 16,
-                    "items": [
-                        {
-                            "type": "Text",
-                            "text": "${wellnessData.summaryLine}",
-                            "fontSize": "${@viewportProfile == 'hubLandscapeSmall' ? '16dp' : '20dp'}",
-                            "color": "@colorTextPrimary",
-                            "paddingBottom": 16
-                        },
-                        {
-                            "type": "SignalRow",
-                            "icon": "💤",
-                            "label": "Sleep",
-                            "value": "${wellnessData.signals.sleep.value}",
-                            "intensityPercent": "${wellnessData.signals.sleep.intensityPercent}",
-                            "statusColor": "${wellnessData.signals.sleep.statusColor}",
-                            "source": "${wellnessData.signals.sleep.source}"
-                        },
-                        {
-                            "type": "SignalRow",
-                            "icon": "⚡",
-                            "label": "Energy",
-                            "value": "${wellnessData.signals.energy.value}",
-                            "intensityPercent": "${wellnessData.signals.energy.intensityPercent}",
-                            "statusColor": "${wellnessData.signals.energy.statusColor}",
-                            "source": "${wellnessData.signals.energy.source}"
-                        },
-                        {
-                            "type": "SignalRow",
-                            "icon": "😊",
-                            "label": "Mood",
-                            "value": "${wellnessData.signals.mood.value}",
-                            "intensityPercent": "${wellnessData.signals.mood.intensityPercent}",
-                            "statusColor": "${wellnessData.signals.mood.statusColor}",
-                            "source": "${wellnessData.signals.mood.source}"
-                        },
-                        {
-                            "type": "SignalRow",
-                            "icon": "🍽",
-                            "label": "Appetite",
-                            "value": "${wellnessData.signals.appetite.value}",
-                            "intensityPercent": "${wellnessData.signals.appetite.intensityPercent}",
-                            "statusColor": "${wellnessData.signals.appetite.statusColor}",
-                            "source": "${wellnessData.signals.appetite.source}"
-                        },
-                        {
-                            "type": "BeeSourceBadge",
-                            "hasBeeData": "${wellnessData.hasBeeData}"
-                        }
-                    ]
+                    "shrink": 1,
+                    "item": {
+                        "type": "Container",
+                        "paddingLeft": "${@viewportProfile == 'hubLandscapeSmall' ? 20 : 48}",
+                        "paddingRight": "${@viewportProfile == 'hubLandscapeSmall' ? 20 : 48}",
+                        "paddingTop": 16,
+                        "items": [
+                            {
+                                "type": "Text",
+                                "text": "${wellnessData.summaryLine}",
+                                "fontSize": "${@viewportProfile == 'hubLandscapeSmall' ? '16dp' : '20dp'}",
+                                "color": "@colorTextPrimary",
+                                "paddingBottom": 16
+                            },
+                            {
+                                "type": "SignalRow",
+                                "icon": "💤",
+                                "label": "Sleep",
+                                "value": "${wellnessData.signals.sleep.value}",
+                                "intensityPercent": "${wellnessData.signals.sleep.intensityPercent}",
+                                "statusColor": "${wellnessData.signals.sleep.statusColor}",
+                                "source": "${wellnessData.signals.sleep.source}"
+                            },
+                            {
+                                "type": "SignalRow",
+                                "icon": "⚡",
+                                "label": "Energy",
+                                "value": "${wellnessData.signals.energy.value}",
+                                "intensityPercent": "${wellnessData.signals.energy.intensityPercent}",
+                                "statusColor": "${wellnessData.signals.energy.statusColor}",
+                                "source": "${wellnessData.signals.energy.source}"
+                            },
+                            {
+                                "type": "SignalRow",
+                                "icon": "😊",
+                                "label": "Mood",
+                                "value": "${wellnessData.signals.mood.value}",
+                                "intensityPercent": "${wellnessData.signals.mood.intensityPercent}",
+                                "statusColor": "${wellnessData.signals.mood.statusColor}",
+                                "source": "${wellnessData.signals.mood.source}"
+                            },
+                            {
+                                "type": "SignalRow",
+                                "icon": "🍽",
+                                "label": "Appetite",
+                                "value": "${wellnessData.signals.appetite.value}",
+                                "intensityPercent": "${wellnessData.signals.appetite.intensityPercent}",
+                                "statusColor": "${wellnessData.signals.appetite.statusColor}",
+                                "source": "${wellnessData.signals.appetite.source}"
+                            },
+                            {
+                                "type": "BeeSourceBadge",
+                                "hasBeeData": "${wellnessData.hasBeeData}"
+                            },
+                            {
+                                "type": "Text",
+                                "text": "Latest report",
+                                "fontSize": "16dp",
+                                "color": "@colorTextSecondary",
+                                "paddingTop": 12
+                            },
+                            {
+                                "type": "Text",
+                                "text": "${wellnessData.dashboard.lastReport}",
+                                "fontSize": "18dp",
+                                "color": "@colorTextPrimary"
+                            },
+                            {
+                                "type": "Text",
+                                "text": "Next follow-up",
+                                "fontSize": "16dp",
+                                "color": "@colorTextSecondary",
+                                "paddingTop": 12
+                            },
+                            {
+                                "type": "Text",
+                                "text": "${wellnessData.dashboard.nextFollowup}",
+                                "fontSize": "18dp",
+                                "color": "@colorTextPrimary"
+                            },
+                            {
+                                "type": "Text",
+                                "text": "Sharing permission",
+                                "fontSize": "16dp",
+                                "color": "@colorTextSecondary",
+                                "paddingTop": 12
+                            },
+                            {
+                                "type": "Text",
+                                "text": "${wellnessData.dashboard.permission}",
+                                "fontSize": "18dp",
+                                "color": "@colorTextPrimary"
+                            }
+                        ],
+                        "width": "100%"
+                    }
                 },
                 {
                     "type": "AlexaFooter",

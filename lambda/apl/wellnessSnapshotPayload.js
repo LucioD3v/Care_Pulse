@@ -2,6 +2,7 @@
 
 const document = require('./wellnessSnapshot.json');
 const { escapeSsml } = require('../voice_format');
+const { sleepIntensity } = require('../care_baseline');
 
 const DOCUMENT_TOKEN = 'wellnessSnapshot';
 const CARD_SIGNALS = ['sleep', 'energy', 'mood', 'appetite'];
@@ -10,13 +11,14 @@ const HIGH_STATES = new Set(['high', 'worse', 'severe', 'much-more-than-usual'])
 const MODERATE_STATES = new Set(['moderate', 'more-than-usual', 'same']);
 
 const INTENSITY_STYLE = {
+    unknown: { intensityPercent: 0, statusColor: '#A0A0A0' },
     low: { intensityPercent: 20, statusColor: '#1DB954' },
     moderate: { intensityPercent: 55, statusColor: '#F5A623' },
     high: { intensityPercent: 90, statusColor: '#E74C3C' }
 };
 
 function buildSignalEntry(signal, rawValue, intensity, source) {
-    const style = INTENSITY_STYLE[intensity] || INTENSITY_STYLE.low;
+    const style = INTENSITY_STYLE[intensity] || INTENSITY_STYLE.unknown;
     return {
         label: signal,
         value: rawValue || 'No data',
@@ -26,13 +28,6 @@ function buildSignalEntry(signal, rawValue, intensity, source) {
     };
 }
 
-function sleepIntensity(hoursSlept, baselineHours) {
-    const delta = Math.abs(hoursSlept - baselineHours);
-    if (delta <= 0.5) return 'low';
-    if (delta <= 2) return 'moderate';
-    return 'high';
-}
-
 function isBeeEvent(event) {
     return event.provenance === 'bee' || event.source === 'bee';
 }
@@ -40,7 +35,7 @@ function isBeeEvent(event) {
 function intensityFromState(state) {
     if (HIGH_STATES.has(state)) return 'high';
     if (MODERATE_STATES.has(state)) return 'moderate';
-    return 'low';
+    return ['low', 'better'].includes(state) ? 'low' : 'unknown';
 }
 
 // History arrives newest first, so the first event per card slot is the latest reading.
@@ -71,9 +66,14 @@ function buildWellnessSnapshotPayload(opts = {}) {
         followupTime: escapeSsml(opts.followupTime || ''),
         caregiverAlerted: Boolean(opts.caregiverAlerted),
         hasBeeData: Boolean(opts.hasBeeData),
+        dashboard: {
+            lastReport: escapeSsml(opts.dashboard?.lastReport || 'No recent report'),
+            nextFollowup: escapeSsml(opts.dashboard?.nextFollowup || 'None scheduled'),
+            permission: escapeSsml(opts.dashboard?.permission || 'No follow-up awaiting permission')
+        },
         signals: Object.fromEntries(CARD_SIGNALS.map(name => [
             name,
-            escapedEntry(signals[name] || buildSignalEntry(name, 'No data', 'low', ''))
+            escapedEntry(signals[name] || buildSignalEntry(name, 'No data', 'unknown', ''))
         ]))
     };
 }

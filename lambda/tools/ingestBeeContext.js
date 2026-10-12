@@ -3,10 +3,10 @@
 const { partitionKey, putRecordIfAbsent } = require('../care_repository');
 const { getCareContext } = require('../care_service');
 const { resolveBeeLink } = require('../bee_link');
-const { sleepIntensity } = require('../apl/wellnessSnapshotPayload');
+const { sleepIntensity, verifiedSleepBaseline } = require('../care_baseline');
+const { metric } = require('../observability');
 
 const EVENT_TTL_SECONDS = 90 * 24 * 60 * 60;
-const DEFAULT_BASELINE_SLEEP_HOURS = 8;
 
 const SIGNAL_PATTERNS = [
     { pattern: /\b(tired|exhausted|drained)\b/i, signal: 'tiredness' },
@@ -95,6 +95,7 @@ function selectWearerTexts(beeExport) {
 async function ingestBeeContext({ linkCode, beeExport } = {}) {
     const { ownerId, memberName, consentId } = await resolveBeeLink(linkCode);
     validateExport(beeExport);
+    require('../mcp_contracts').validateToolInput('ingest_bee_context', { linkCode, beeExport });
     const startedAt = Date.now();
     const pk = partitionKey(ownerId);
     const recordedAt = new Date(beeExport.exportedAt).toISOString();
@@ -112,13 +113,14 @@ async function ingestBeeContext({ linkCode, beeExport } = {}) {
     const sleepHours = beeExport.healthKit?.sleepHours;
     if (sleepHours !== undefined) {
         const context = await getCareContext({ ownerId, memberName });
-        const baseline = Number(context.baselineSleepHours ?? context.sleepHoursBaseline ?? DEFAULT_BASELINE_SLEEP_HOURS);
+        const baseline = verifiedSleepBaseline(context);
         events.push({
             sk: `${eventPrefix}#bee-healthkit-sleep`,
             signal: 'sleep',
-            state: sleepIntensity(sleepHours, baseline),
+            state: baseline === null ? 'reported' : sleepIntensity(sleepHours, baseline),
             numericValue: sleepHours,
-            details: `${sleepHours} hours from Bee export (baseline ${baseline} hours)`
+            details: baseline === null ? `${sleepHours} hours from Bee export; no verified baseline`
+                : `${sleepHours} hours from Bee export (baseline ${baseline} hours)`
         });
     }
 
@@ -139,20 +141,15 @@ async function ingestBeeContext({ linkCode, beeExport } = {}) {
                 expiresAt
             });
             written ? eventsIngested++ : skipped++;
-        } catch (error) {
-            errors.push({ signal: event.signal, message: error.message });
+        } catch {
+            errors.push({ signal: event.signal, message: 'The event could not be saved. Its write status is unconfirmed.' });
         }
     }
 
     const signalsDetected = [...new Set(events.map(event => event.signal))];
-    console.info(JSON.stringify({
-        event: 'mcp_tool_completed',
-        tool: 'ingest_bee_context',
-        durationMs: Date.now() - startedAt,
-        ownerId,
-        memberName,
-        outcome: errors.length ? 'partial' : 'ok'
-    }));
+    metric('BeeIngestionDuration', Date.now() - startedAt, 'Milliseconds');
+    metric('BeeEventsIngested', eventsIngested);
+    if (errors.length) metric('BeeIngestionErrors', errors.length);
 
     return { success: errors.length === 0, eventsIngested, signalsDetected, skipped, ignored, errors };
 }

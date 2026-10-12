@@ -1,7 +1,10 @@
 'use strict';
 
 const crypto = require('crypto');
-const AWS = require('aws-sdk');
+const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+const { DynamoDBDocumentClient, PutCommand, QueryCommand } = require('@aws-sdk/lib-dynamodb');
+const { SNSClient, PublishCommand } = require('@aws-sdk/client-sns');
+const { sendWithBudget } = require('./observability');
 
 function clientOptions() {
     const endpoint = process.env.LOCALSTACK_ENDPOINT || process.env.AWS_ENDPOINT_URL;
@@ -11,16 +14,17 @@ function clientOptions() {
 
     if (endpoint) {
         options.endpoint = endpoint;
-        options.sslEnabled = endpoint.startsWith('https://');
-        options.accessKeyId = process.env.AWS_ACCESS_KEY_ID || 'test';
-        options.secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY || 'test';
+        options.credentials = {
+            accessKeyId: process.env.AWS_ACCESS_KEY_ID || 'test',
+            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || 'test'
+        };
     }
 
     return options;
 }
 
-const dynamodb = new AWS.DynamoDB.DocumentClient(clientOptions());
-const sns = new AWS.SNS(clientOptions());
+const dynamodb = DynamoDBDocumentClient.from(new DynamoDBClient({ ...clientOptions(), maxAttempts: 2 }), { marshallOptions: { removeUndefinedValues: true } });
+const sns = new SNSClient({ ...clientOptions(), maxAttempts: 1 });
 
 function requireEnvironment(name) {
     const value = process.env[name];
@@ -49,29 +53,34 @@ async function saveVital({ userId, requestId, metric, value, diastolic, unit }) 
         item.Diastolic = diastolic;
     }
 
-    await dynamodb.put({
+    await sendWithBudget(dynamodb, new PutCommand({
         TableName: requireEnvironment('VITALS_TABLE_NAME'),
         Item: item,
         ConditionExpression: 'attribute_not_exists(UserId) AND attribute_not_exists(RecordId)'
-    }).promise();
+    }));
 
     return item;
 }
 
 async function getVitals({ userId, since, until = new Date(), limit = 100 }) {
-    const result = await dynamodb.query({
-        TableName: requireEnvironment('VITALS_TABLE_NAME'),
-        KeyConditionExpression: 'UserId = :userId AND RecordId BETWEEN :from AND :to',
-        ExpressionAttributeValues: {
-            ':userId': userId,
-            ':from': `${since.toISOString()}#`,
-            ':to': `${until.toISOString()}#\uffff`
-        },
-        ScanIndexForward: false,
-        Limit: limit
-    }).promise();
-
-    return result.Items || [];
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw new TypeError('limit must be between 1 and 1000.');
+    const items = [];
+    let cursor;
+    do {
+        const result = await sendWithBudget(dynamodb, new QueryCommand({
+            TableName: requireEnvironment('VITALS_TABLE_NAME'),
+            KeyConditionExpression: 'UserId = :userId AND RecordId BETWEEN :from AND :to',
+            ExpressionAttributeValues: {
+                ':userId': userId, ':from': since.toISOString() + '#', ':to': until.toISOString() + '#\uffff'
+            },
+            ConsistentRead: true, ScanIndexForward: false,
+            Limit: limit - items.length,
+            ...(cursor ? { ExclusiveStartKey: cursor } : {})
+        }));
+        items.push(...(result.Items || []));
+        cursor = result.LastEvaluatedKey;
+    } while (cursor && items.length < limit);
+    return items;
 }
 
 async function sendCaregiverAlert({ userId, severity, message, requestId }) {
@@ -85,11 +94,11 @@ async function sendCaregiverAlert({ userId, severity, message, requestId }) {
         sentAt
     };
 
-    const result = await sns.publish({
+    const result = await sendWithBudget(sns, new PublishCommand({
         TopicArn: requireEnvironment('CAREGIVER_TOPIC_ARN'),
         Subject: `CarePulse ${severity} caregiver alert`,
         Message: JSON.stringify(payload)
-    }).promise();
+    }));
 
     return { messageId: result.MessageId, ...payload };
 }

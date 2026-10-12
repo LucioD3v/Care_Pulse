@@ -22,6 +22,7 @@ const ALERT_STATUS = {
     notNeeded: 'No alert needed',
     sent: caregiverName => `${caregiverName} notified`,
     simulated: 'Notification simulated',
+    failed: 'Notification not confirmed',
     noConsent: 'Not shared: no active consent'
 };
 
@@ -38,6 +39,7 @@ const COPY = {
     noPending: memberName => `I do not have a pending check-in for ${memberName}. You can ask me to schedule one.`,
     alertSent: caregiverName => `Thank you. I recorded the follow-up and sent ${caregiverName} the brief alert you authorized.`,
     alertUnavailable: caregiverName => `Thank you. I recorded the follow-up. The authorized alert was prepared, but the notification service is unavailable, so please contact ${caregiverName} directly.`,
+    alertUnknown: caregiverName => `I recorded the follow-up, but I could not confirm whether the notification service accepted the alert. Please contact ${caregiverName} directly.`,
     noPermission: 'Thank you. I recorded the follow-up, but I did not share it because there is no active permission.',
     noAlert: status => `Thank you. I recorded that you feel ${status}. No caregiver alert was needed.`,
     summaryShort: (memberName, timeframe, snapshot) => `${memberName}'s ${timeframe} summary: ${snapshot.status}. ${snapshot.eventCount} wellness reports. Follow-up: ${snapshot.followup}.`,
@@ -51,7 +53,8 @@ const COPY = {
     help: 'Try saying, I feel more tired than usual, schedule a check-in at six, or give me my wellness summary. You can also say, use short summaries.',
     goodbye: 'Take care.',
     fallback: 'I can record a wellness signal, create a follow-up, or show a simple weekly summary. What would you like to do?',
-    error: 'I am sorry, something went wrong. Please try again.',
+    error: 'I could not confirm the result. Please check your summary before trying again.',
+    reportSavedError: 'Your report was saved, but I could not finish preparing the response. You can ask for a summary.',
     preferenceHelp: 'You can say, use short summaries, use detailed summaries, set my follow-up time to eight PM, or turn off follow-up suggestions.',
     preferenceInvalidLength: 'Please choose short or detailed summaries.',
     preferenceInvalidOffers: 'Please say turn on or turn off follow-up suggestions.',

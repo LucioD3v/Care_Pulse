@@ -167,7 +167,7 @@ function buildExports({ facts, conversations, wearerSpeakers, sinceMs }) {
 async function getJson(url, label) {
     let response;
     try {
-        response = await fetch(url, { headers: { accept: 'application/json' } });
+        response = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(15000) });
     } catch {
         throw new Error(`Cannot reach the Bee proxy at ${url}. Start it with "bee proxy" in another terminal and use the URL it prints.`);
     }
@@ -221,41 +221,52 @@ class McpClient {
         this.key = key;
         this.sessionId = null;
         this.nextId = 1;
+        this.protocolVersion = PROTOCOL_VERSION;
     }
 
     async post(method, params) {
+        const notification = method.startsWith('notifications/');
         const response = await fetch(this.url, {
             method: 'POST',
+            signal: AbortSignal.timeout(15000),
             headers: {
                 'content-type': 'application/json',
-                accept: 'application/json',
+                accept: 'application/json, text/event-stream',
                 'x-carepulse-mcp-key': this.key,
-                'mcp-protocol-version': PROTOCOL_VERSION,
+                'mcp-protocol-version': this.protocolVersion,
                 ...(this.sessionId ? { 'mcp-session-id': this.sessionId } : {})
             },
-            body: JSON.stringify({ jsonrpc: '2.0', id: this.nextId++, method, params })
+            body: JSON.stringify({ jsonrpc: '2.0', ...(notification ? {} : { id: this.nextId++ }), method, params })
         }).catch(() => {
             throw new Error(`Cannot reach CarePulse at ${this.url}. Check --mcp-url (it must end in /mcp).`);
         });
         if (response.status === 401) throw new Error('CarePulse rejected the MCP key. Check CAREPULSE_MCP_KEY.');
+        if (notification && response.status === 202) return { response };
+        if (!response.ok) throw new Error(`CarePulse returned HTTP ${response.status}. Check the endpoint, request size, and session.`);
         const body = await response.json();
         if (body.error) throw new Error(`CarePulse MCP error: ${body.error.message}`);
         return { body, response };
     }
 
     async open() {
-        const { response } = await this.post('initialize', {
+        const { body, response } = await this.post('initialize', {
             protocolVersion: PROTOCOL_VERSION,
             capabilities: {},
             clientInfo: { name: 'carepulse-bee-bridge', version: '1.0.0' }
         });
         this.sessionId = response.headers.get('mcp-session-id');
         if (!this.sessionId) throw new Error('CarePulse did not return an MCP session.');
+        if (body.result?.protocolVersion !== PROTOCOL_VERSION) throw new Error('CarePulse negotiated an unsupported MCP protocol version.');
+        this.protocolVersion = body.result.protocolVersion;
+        await this.post('notifications/initialized');
     }
 
     async ingest(linkCode, beeExport) {
         const { body } = await this.post('tools/call', { name: 'ingest_bee_context', arguments: { linkCode, beeExport } });
         if (body.result?.isError) throw new Error(body.result.content?.[0]?.text || 'ingest_bee_context failed.');
+        if (body.result?.structuredContent?.success !== true) {
+            throw new Error('Bee ingestion did not complete. Retry the same export to recover unconfirmed writes.');
+        }
         return body.result.structuredContent;
     }
 
@@ -263,7 +274,9 @@ class McpClient {
         if (!this.sessionId) return;
         await fetch(this.url, {
             method: 'DELETE',
-            headers: { 'x-carepulse-mcp-key': this.key, 'mcp-session-id': this.sessionId }
+            signal: AbortSignal.timeout(15000),
+            headers: { 'x-carepulse-mcp-key': this.key, 'mcp-session-id': this.sessionId,
+                'mcp-protocol-version': this.protocolVersion }
         }).catch(() => {});
     }
 }

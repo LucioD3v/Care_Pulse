@@ -1,9 +1,9 @@
 'use strict';
 
 const Alexa = require('ask-sdk-core');
-const { getWellnessSnapshot, getWellnessHistory, getCareContext, getPendingFollowup } = require('../care_service');
-const { wellnessSnapshotDirective, signalsFromHistory, isBeeEvent } = require('../apl/wellnessSnapshotPayload');
-const { addAPLIfSupported } = require('../apl/aplSupport');
+const { getWellnessSnapshot, getWellnessHistory, getCareContext, getPendingFollowup, getCareDashboard } = require('../care_service');
+const { signalsFromHistory, isBeeEvent } = require('../apl/wellnessSnapshotPayload');
+const { supportsDashboard, addCareDashboard } = require('../care_dashboard');
 const { CARD_TITLES, CARD_CONTENT, COPY } = require('../voice_copy');
 const { spokenTime } = require('../voice_format');
 
@@ -22,31 +22,37 @@ function createGetWellnessSummaryHandler({ getSlotValue, ownerId, defaultMemberN
             const memberName = getSlotValue(handlerInput, 'memberName') || defaultMemberName();
             const timeframe = getSlotValue(handlerInput, 'timeframe') || 'this week';
             const userOwnerId = ownerId(handlerInput);
-            const [snapshot, history, context, pending] = await Promise.all([
-                getWellnessSnapshot({ ownerId: userOwnerId, memberName, timeframe }),
-                getWellnessHistory({ ownerId: userOwnerId, memberName, timeframe, limit: 50 }),
-                getCareContext({ ownerId: userOwnerId, memberName }),
+            const now = new Date();
+            const context = await getCareContext({ ownerId: userOwnerId, memberName });
+            const [history, pending] = await Promise.all([
+                getWellnessHistory({ ownerId: userOwnerId, memberName, timeframe, context, now }),
                 getPendingFollowup({ ownerId: userOwnerId, memberName })
             ]);
+            const snapshot = await getWellnessSnapshot({
+                ownerId: userOwnerId, memberName, timeframe, context, now, history, pending
+            });
             const signalText = snapshot.signals.length ? snapshot.signals.join(', ') : 'no recent signals';
             const speech = context.summaryLength === 'detailed'
                 ? COPY.summaryDetailed(memberName, timeframe, snapshot, signalText)
                 : COPY.summaryShort(memberName, timeframe, snapshot);
 
-            const directive = wellnessSnapshotDirective({
-                memberName,
-                timeframe,
-                summaryLine: buildSummaryLine(snapshot, signalText),
-                followupScheduled: Boolean(pending),
-                followupTime: pending ? `${pending.dueDate} at ${spokenTime(pending.dueTime)}` : '',
-                caregiverAlerted: false,
-                hasBeeData: history.some(isBeeEvent),
-                signals: signalsFromHistory(history)
-            });
-
             const responseBuilder = speakText(handlerInput, speech)
                 .withSimpleCard(CARD_TITLES.summary, CARD_CONTENT.summary(memberName, timeframe, snapshot, signalText));
-            addAPLIfSupported(handlerInput, directive, responseBuilder);
+            if (supportsDashboard(handlerInput)) {
+                const dashboard = await getCareDashboard({
+                    ownerId: userOwnerId, memberName, context, history, followup: pending, now
+                });
+                addCareDashboard(handlerInput, dashboard, {
+                    memberName,
+                    timeframe,
+                    summaryLine: buildSummaryLine(snapshot, signalText),
+                    followupScheduled: Boolean(pending),
+                    followupTime: pending ? `${pending.dueDate} at ${spokenTime(pending.dueTime)}` : '',
+                    caregiverAlerted: false,
+                    hasBeeData: history.some(isBeeEvent),
+                    signals: signalsFromHistory(history)
+                });
+            }
             return responseBuilder.getResponse();
         }
     };

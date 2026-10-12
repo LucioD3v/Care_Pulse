@@ -150,6 +150,10 @@ test('send delivers only wearer lines and confirmed facts, end to end into the A
     assert.deepEqual(first.signals.sort(), ['mood', 'tiredness']);
 
     const sent = servers.mcpBodies.join('\n');
+    const notification = servers.mcpBodies.filter(Boolean).map(body => JSON.parse(body))
+        .find(body => body.method === 'notifications/initialized');
+    assert.ok(notification);
+    assert.equal(Object.hasOwn(notification, 'id'), false);
     assert.match(sent, /anxious/);
     assert.doesNotMatch(sent, /dizzy|pain|appetite|last month/);
 
@@ -194,4 +198,23 @@ test('a stopped or logged-out Bee proxy gives an actionable error', async t => {
     const servers = await startServers(t, {});
     await assert.rejects(() => bridge.run(options({ beeUrl: servers.beeUrl }), quiet), /bee proxy.*bee status/);
     await assert.rejects(() => bridge.run(options({ beeUrl: 'http://127.0.0.1:9' }), quiet), /Start it with "bee proxy"/);
+});
+
+test('bridge does not report success when ingestion returns a partial result', async t => {
+    const servers = await startServers(t);
+    const originalFetch = global.fetch;
+    t.mock.method(global, 'fetch', async (url, init) => {
+        if (String(url) !== servers.mcpUrl) return originalFetch(url, init);
+        if (init.method === 'DELETE') return new Response(null, { status: 204 });
+        const body = JSON.parse(init.body);
+        if (body.method === 'notifications/initialized') return new Response(null, { status: 202 });
+        const result = body.method === 'initialize' ? { protocolVersion: '2025-11-25' }
+            : { isError: false, structuredContent: { success: false, eventsIngested: 0, skipped: 0, signalsDetected: [] } };
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: body.id, result }), {
+            headers: { 'content-type': 'application/json', 'mcp-session-id': 'test-session' }
+        });
+    });
+    await assert.rejects(() => bridge.run(options({
+        beeUrl: servers.beeUrl, mcpUrl: servers.mcpUrl, linkCode: 'ABCD-2345', send: true
+    }), quiet), /did not complete/);
 });

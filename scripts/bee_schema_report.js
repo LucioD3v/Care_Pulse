@@ -44,4 +44,10 @@ if (!files.length) {
     console.error('Usage: node scripts/bee_schema_report.js <file.json> [more.json]');
     process.exit(1);
 }
-console.log(files.map(report).join('\n\n'));
+try {
+    console.log(files.map(report).join('\n\n'));
+} catch {
+    // JSON parser errors can include transcript excerpts; never print them.
+    console.error('Unable to read a Bee export. Check that each file exists and contains valid JSON.');
+    process.exitCode = 1;
+}
