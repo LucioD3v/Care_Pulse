@@ -14,6 +14,13 @@ const LINK_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const LINK_CODE_LENGTH = 8;
 const BEE_CONSENT_SCOPE = 'derive-wellness-signals-from-wearer-speech-and-confirmed-facts';
 
+class InvalidBeeLinkError extends Error {
+    constructor() {
+        super('Bee link code is invalid, expired, or revoked. Ask the member to link Bee again in CarePulse.');
+        this.name = 'InvalidBeeLinkError';
+    }
+}
+
 function memberKey(memberName) {
     return String(memberName || '').trim().toLowerCase().replace(/\s+/g, '-');
 }
@@ -92,7 +99,7 @@ async function grantBeeConsent({ ownerId, memberName }) {
 }
 
 async function resolveBeeLink(linkCode) {
-    const invalid = new Error('Bee link code is invalid, expired, or revoked. Ask the member to link Bee again in CarePulse.');
+    const invalid = new InvalidBeeLinkError();
     if (normalizeLinkCode(linkCode).length !== LINK_CODE_LENGTH) {
         throw invalid;
     }
@@ -123,6 +130,7 @@ async function revokeBeeConsent({ ownerId, memberName }) {
 }
 
 module.exports = {
+    InvalidBeeLinkError,
     BEE_CONSENT_SCOPE,
     grantBeeConsent,
     resolveBeeLink,

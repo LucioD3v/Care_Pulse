@@ -43,6 +43,7 @@ async function main() {
         memberName,
         caregiverName: process.env.DEFAULT_CAREGIVER_NAME || 'Laura',
         baselineSleepHours: 7.5,
+        baselineSource: 'demo',
         timezone: process.env.DEFAULT_TIME_ZONE || 'America/Mexico_City',
         createdAt: new Date().toISOString()
     });

@@ -6,7 +6,7 @@ provider:
   name: aws
   runtime: nodejs22.x
   architecture: arm64
-  region: ${opt:region, 'us-east-1'}
+  region: ${opt:region, env:AWS_REGION, 'us-east-1'}
   stage: ${opt:stage, 'dev'}
   memorySize: 512
   timeout: 15
@@ -16,37 +16,12 @@ provider:
   environment:
     CARE_TABLE_NAME:
       Ref: CarePulseTable
-    SNS_TOPIC_ARN:
-      Ref: CaregiverAlertsTopic
-    BEDROCK_MODEL_ID: ${param:bedrockModelId}
-    REQUIRE_BEDROCK: 'true'
-    DEFAULT_MEMBER_NAME: ${param:defaultMemberName, 'Elena'}
-    DEFAULT_CAREGIVER_NAME: ${param:defaultCaregiverName, 'Laura'}
-    DEFAULT_BASELINE_SLEEP_HOURS: ${param:baselineSleepHours, '8.0'}
-    DEFAULT_TIME_ZONE: ${param:timeZone, 'America/Mexico_City'}
-    DEMO_OWNER_ID: ${param:demoOwnerId, ''}
-  iam:
-    role:
-      statements:
-        - Effect: Allow
-          Action:
-            - dynamodb:GetItem
-            - dynamodb:PutItem
-            - dynamodb:Query
-            - dynamodb:UpdateItem
-            - dynamodb:DeleteItem
-          Resource:
-            - Fn::GetAtt: [CarePulseTable, Arn]
-        - Effect: Allow
-          Action:
-            - sns:Publish
-          Resource:
-            Ref: CaregiverAlertsTopic
-        - Effect: Allow
-          Action:
-            - bedrock:InvokeModel
-            - bedrock:InvokeModelWithResponseStream
-          Resource: '*'
+    STAGE: ${sls:stage}
+    DEFAULT_MEMBER_NAME: ${param:defaultMemberName, env:DEFAULT_MEMBER_NAME, 'Elena'}
+    DEFAULT_CAREGIVER_NAME: ${param:defaultCaregiverName, env:DEFAULT_CAREGIVER_NAME, 'Laura'}
+    DEFAULT_BASELINE_SLEEP_HOURS: ${param:baselineSleepHours, env:DEFAULT_BASELINE_SLEEP_HOURS, ''}
+    DEFAULT_TIME_ZONE: ${param:timeZone, env:DEFAULT_TIME_ZONE, 'America/Mexico_City'}
+    DEMO_OWNER_ID: ${param:demoOwnerId, env:DEMO_OWNER_ID, ''}
   tags:
     Project: CarePulse
     Component: AlexaMVP
@@ -64,27 +39,40 @@ functions:
     name: carepulse-${sls:stage}-alexa-skill
     description: CarePulse voice-first family wellness orchestration MVP
     handler: lambda/index.handler
+    role: { Fn::GetAtt: [AlexaRole, Arn] }
+    environment:
+      ALEXA_SKILL_ID: ${param:alexaSkillId, env:ALEXA_SKILL_ID}
+      SNS_TOPIC_ARN: { Ref: CaregiverAlertsTopic }
+      BEDROCK_MODEL_ID: ${param:bedrockModelId, env:BEDROCK_MODEL_ID, ''}
+      VOICE_TIMEOUT_MS: ${param:voiceTimeoutMs, env:VOICE_TIMEOUT_MS, '1200'}
     package:
       patterns:
         - lambda/**
         - '!lambda/test/**'
         - '!lambda/seed_demo.js'
+        - '!lambda/backfill_followup_index.js'
+        - '!**/.env*'
     events:
       - alexaSkill:
-          appId: ${param:alexaSkillId}
+          appId: ${param:alexaSkillId, env:ALEXA_SKILL_ID}
           enabled: true
 
   mcpGateway:
     name: carepulse-${sls:stage}-mcp-gateway
     description: CarePulse MCP 2025-11-25 JSON Streamable HTTP gateway
     handler: lambda/mcp_http.handler
+    role: { Fn::GetAtt: [McpRole, Arn] }
     environment:
-      MCP_API_KEY: ${param:mcpApiKey}
+      MCP_API_KEY: ${param:mcpApiKey, env:MCP_API_KEY, env:CAREPULSE_MCP_KEY}
+      MCP_ALLOWED_ORIGINS: ${param:mcpAllowedOrigins, env:MCP_ALLOWED_ORIGINS, ''}
+      SNS_TOPIC_ARN: { Ref: CaregiverAlertsTopic }
     package:
       patterns:
         - lambda/**
         - '!lambda/test/**'
         - '!lambda/seed_demo.js'
+        - '!lambda/backfill_followup_index.js'
+        - '!**/.env*'
     events:
       - httpApi:
           path: /mcp
@@ -92,8 +80,37 @@ functions:
       - httpApi:
           path: /mcp
           method: DELETE
+      - httpApi:
+          path: /mcp
+          method: GET
+
+  followupMonitor:
+    name: carepulse-${sls:stage}-followup-monitor
+    handler: lambda/followup_monitor.handler
+    role: { Fn::GetAtt: [MonitorRole, Arn] }
+    timeout: 60
+    package:
+      patterns:
+        - lambda/**
+        - '!lambda/test/**'
+        - '!lambda/seed_demo.js'
+        - '!lambda/backfill_followup_index.js'
+        - '!**/.env*'
+    events:
+      - schedule: rate(5 minutes)
 
 resources:
+  Parameters:
+    BedrockInvokeResources:
+      Type: CommaDelimitedList
+      Default: ${param:bedrockResourceArns, env:BEDROCK_RESOURCE_ARNS, ''}
+      AllowedPattern: '^$|^arn:[^:]+:bedrock:[^:]+:[0-9]*:(foundation-model|inference-profile|application-inference-profile)/[^*]+$'
+    OperationsAlarmTopicArn:
+      Type: String
+      Default: ${param:operationsAlarmTopicArn, env:OPERATIONS_ALARM_TOPIC_ARN, ''}
+  Conditions:
+    HasBedrock: { Fn::Not: [{ Fn::Equals: ["${param:bedrockModelId, env:BEDROCK_MODEL_ID, ''}", ''] }] }
+    HasAlarmTopic: { Fn::Not: [{ Fn::Equals: [{ Ref: OperationsAlarmTopicArn }, ''] }] }
   Resources:
     CarePulseTable:
       Type: AWS::DynamoDB::Table
@@ -107,11 +124,24 @@ resources:
             AttributeType: S
           - AttributeName: sk
             AttributeType: S
+          - AttributeName: pendingPartition
+            AttributeType: S
+          - AttributeName: dueAt
+            AttributeType: S
         KeySchema:
           - AttributeName: pk
             KeyType: HASH
           - AttributeName: sk
             KeyType: RANGE
+        GlobalSecondaryIndexes:
+          - IndexName: PendingFollowups
+            KeySchema:
+              - AttributeName: pendingPartition
+                KeyType: HASH
+              - AttributeName: dueAt
+                KeyType: RANGE
+            Projection:
+              ProjectionType: KEYS_ONLY
         PointInTimeRecoverySpecification:
           PointInTimeRecoveryEnabled: true
         SSESpecification:
@@ -128,7 +158,254 @@ resources:
       Properties:
         TopicName: carepulse-${sls:stage}-caregiver-alerts
         DisplayName: CarePulse check-ins
-        KmsMasterKeyId: alias/aws/sns
+        KmsMasterKeyId: { Ref: NotificationKey }
+
+    NotificationKey:
+      Type: AWS::KMS::Key
+      DeletionPolicy: Retain
+      UpdateReplacePolicy: Retain
+      Properties:
+        EnableKeyRotation: true
+        KeyPolicy:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal: { AWS: { Fn::Sub: 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root' } }
+              Action: 'kms:*'
+              Resource: '*'
+    AlexaRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal: { Service: lambda.amazonaws.com }
+              Action: sts:AssumeRole
+        Policies:
+          - PolicyName: AlexaRolePolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents]
+                  Resource:
+                    Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/carepulse-${sls:stage}-alexa-skill:*
+                - Effect: Allow
+                  Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:Query, dynamodb:UpdateItem, dynamodb:DeleteItem]
+                  Resource:
+                    - { Fn::GetAtt: [CarePulseTable, Arn] }
+                - Effect: Allow
+                  Action: sns:Publish
+                  Resource: { Ref: CaregiverAlertsTopic }
+                - Effect: Allow
+                  Action: [kms:GenerateDataKey, kms:Decrypt]
+                  Resource: { Fn::GetAtt: [NotificationKey, Arn] }
+                  Condition:
+                    StringEquals:
+                      kms:ViaService: { Fn::Sub: 'sns.${AWS::Region}.amazonaws.com' }
+                - Fn::If:
+                    - HasBedrock
+                    - Effect: Allow
+                      Action: bedrock:InvokeModel
+                      Resource: { Ref: BedrockInvokeResources }
+                    - { Ref: 'AWS::NoValue' }
+    McpRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal: { Service: lambda.amazonaws.com }
+              Action: sts:AssumeRole
+        Policies:
+          - PolicyName: McpRolePolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents]
+                  Resource:
+                    Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/carepulse-${sls:stage}-mcp-gateway:*
+                - Effect: Allow
+                  Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:Query, dynamodb:UpdateItem, dynamodb:DeleteItem]
+                  Resource:
+                    - { Fn::GetAtt: [CarePulseTable, Arn] }
+                - Effect: Allow
+                  Action: sns:Publish
+                  Resource: { Ref: CaregiverAlertsTopic }
+                - Effect: Allow
+                  Action: [kms:GenerateDataKey, kms:Decrypt]
+                  Resource: { Fn::GetAtt: [NotificationKey, Arn] }
+                  Condition:
+                    StringEquals:
+                      kms:ViaService: { Fn::Sub: 'sns.${AWS::Region}.amazonaws.com' }
+    MonitorRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal: { Service: lambda.amazonaws.com }
+              Action: sts:AssumeRole
+        Policies:
+          - PolicyName: MonitorRolePolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents]
+                  Resource:
+                    Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/carepulse-${sls:stage}-followup-monitor:*
+                - Effect: Allow
+                  Action: [dynamodb:GetItem, dynamodb:Query]
+                  Resource:
+                    - { Fn::GetAtt: [CarePulseTable, Arn] }
+                    - { Fn::Sub: "${CarePulseTable.Arn}/index/PendingFollowups" }
+    AlexaLatencyAlarm:
+      Type: AWS::CloudWatch::Alarm
+      Properties:
+        Namespace: CarePulse
+        MetricName: RequestDuration
+        Dimensions:
+          - Name: Service
+            Value: alexa
+          - Name: Stage
+            Value: ${sls:stage}
+        ExtendedStatistic: p95
+        Period: 60
+        EvaluationPeriods: 1
+        Threshold: 3000
+        ComparisonOperator: GreaterThanOrEqualToThreshold
+        TreatMissingData: notBreaching
+        AlarmActions:
+          Fn::If: [HasAlarmTopic, [{ Ref: OperationsAlarmTopicArn }], { Ref: 'AWS::NoValue' }]
+    AlexaNotificationAlarm:
+      Type: AWS::CloudWatch::Alarm
+      Properties:
+        Namespace: CarePulse
+        MetricName: NotificationFailures
+        Dimensions:
+          - Name: Service
+            Value: alexa
+          - Name: Stage
+            Value: ${sls:stage}
+        Statistic: Sum
+        Period: 60
+        EvaluationPeriods: 1
+        Threshold: 1
+        ComparisonOperator: GreaterThanOrEqualToThreshold
+        TreatMissingData: notBreaching
+        AlarmActions:
+          Fn::If: [HasAlarmTopic, [{ Ref: OperationsAlarmTopicArn }], { Ref: 'AWS::NoValue' }]
+    McpNotificationAlarm:
+      Type: AWS::CloudWatch::Alarm
+      Properties:
+        Namespace: CarePulse
+        MetricName: NotificationFailures
+        Dimensions:
+          - Name: Service
+            Value: mcp
+          - Name: Stage
+            Value: ${sls:stage}
+        Statistic: Sum
+        Period: 60
+        EvaluationPeriods: 1
+        Threshold: 1
+        ComparisonOperator: GreaterThanOrEqualToThreshold
+        TreatMissingData: notBreaching
+        AlarmActions:
+          Fn::If: [HasAlarmTopic, [{ Ref: OperationsAlarmTopicArn }], { Ref: 'AWS::NoValue' }]
+    AlexaErrorsAlarm:
+      Type: AWS::CloudWatch::Alarm
+      Properties:
+        Namespace: CarePulse
+        MetricName: RequestErrors
+        Dimensions:
+          - Name: Service
+            Value: alexa
+          - Name: Stage
+            Value: ${sls:stage}
+        Statistic: Sum
+        Period: 60
+        EvaluationPeriods: 1
+        Threshold: 1
+        ComparisonOperator: GreaterThanOrEqualToThreshold
+        TreatMissingData: notBreaching
+        AlarmActions:
+          Fn::If: [HasAlarmTopic, [{ Ref: OperationsAlarmTopicArn }], { Ref: 'AWS::NoValue' }]
+    McpErrorsAlarm:
+      Type: AWS::CloudWatch::Alarm
+      Properties:
+        Namespace: CarePulse
+        MetricName: ServiceErrors
+        Dimensions:
+          - Name: Service
+            Value: mcp
+          - Name: Stage
+            Value: ${sls:stage}
+        Statistic: Sum
+        Period: 60
+        EvaluationPeriods: 1
+        Threshold: 1
+        ComparisonOperator: GreaterThanOrEqualToThreshold
+        TreatMissingData: notBreaching
+        AlarmActions:
+          Fn::If: [HasAlarmTopic, [{ Ref: OperationsAlarmTopicArn }], { Ref: 'AWS::NoValue' }]
+    OverdueFollowupsAlarm:
+      Type: AWS::CloudWatch::Alarm
+      Properties:
+        Namespace: CarePulse
+        MetricName: OldestOverdueAge
+        Dimensions:
+          - Name: Service
+            Value: monitor
+          - Name: Stage
+            Value: ${sls:stage}
+        Statistic: Maximum
+        Period: 300
+        EvaluationPeriods: 1
+        Threshold: 86400
+        ComparisonOperator: GreaterThanOrEqualToThreshold
+        TreatMissingData: notBreaching
+        AlarmActions:
+          Fn::If: [HasAlarmTopic, [{ Ref: OperationsAlarmTopicArn }], { Ref: 'AWS::NoValue' }]
+    McpToolErrorsAlarm:
+      Type: AWS::CloudWatch::Alarm
+      Properties:
+        Namespace: CarePulse
+        MetricName: ToolErrors
+        Dimensions:
+          - Name: Service
+            Value: mcp
+          - Name: Stage
+            Value: ${sls:stage}
+        Statistic: Sum
+        Period: 60
+        EvaluationPeriods: 1
+        Threshold: 1
+        ComparisonOperator: GreaterThanOrEqualToThreshold
+        TreatMissingData: notBreaching
+        AlarmActions:
+          Fn::If: [HasAlarmTopic, [{ Ref: OperationsAlarmTopicArn }], { Ref: 'AWS::NoValue' }]
+    MonitorErrorsAlarm:
+      Type: AWS::CloudWatch::Alarm
+      Properties:
+        Namespace: AWS/Lambda
+        MetricName: Errors
+        Dimensions:
+          - Name: FunctionName
+            Value: carepulse-${sls:stage}-followup-monitor
+        Statistic: Sum
+        Period: 300
+        EvaluationPeriods: 1
+        Threshold: 1
+        ComparisonOperator: GreaterThanOrEqualToThreshold
+        TreatMissingData: notBreaching
+        AlarmActions:
+          Fn::If: [HasAlarmTopic, [{ Ref: OperationsAlarmTopicArn }], { Ref: 'AWS::NoValue' }]
 
   Outputs:
     AlexaLambdaArn:

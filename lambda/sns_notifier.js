@@ -1,8 +1,9 @@
 'use strict';
 
 const { SNSClient, PublishCommand } = require('@aws-sdk/client-sns');
+const { metric, sendWithBudget } = require('./observability');
 
-const snsClient = new SNSClient({ region: process.env.AWS_REGION || 'us-east-1' });
+const snsClient = new SNSClient({ region: process.env.AWS_REGION || 'us-east-1', maxAttempts: 1 });
 
 function formatAlert({ memberName, caregiverName, signal, followupStatus, consentId }) {
     const readableSignal = String(signal || 'wellness concern').replace(/-/g, ' ');
@@ -26,12 +27,12 @@ async function sendCaregiverAlert(alert) {
     const formatted = formatAlert(alert);
     const topicArn = process.env.SNS_TOPIC_ARN;
     if (!topicArn) {
-        console.info('SNS mock alert created; configure SNS_TOPIC_ARN to enable delivery.');
-        return { sent: false, simulated: true, message: formatted.message };
+        metric('NotificationUnconfigured');
+        return { sent: false, simulated: true, status: 'unconfigured' };
     }
 
     try {
-        const result = await snsClient.send(new PublishCommand({
+        const result = await sendWithBudget(snsClient, new PublishCommand({
             TopicArn: topicArn,
             Subject: formatted.subject.slice(0, 100),
             Message: formatted.message,
@@ -41,10 +42,13 @@ async function sendCaregiverAlert(alert) {
                 source: { DataType: 'String', StringValue: 'CarePulse MCP' }
             }
         }));
-        return { sent: true, simulated: false, messageId: result.MessageId, message: formatted.message };
+        metric('NotificationsAccepted');
+        return { sent: true, simulated: false, status: 'accepted', messageId: result.MessageId };
     } catch (error) {
-        console.warn('SNS publish failed; retaining a local mock result:', error.message);
-        return { sent: false, simulated: true, message: formatted.message, error: error.name };
+        const status = error.$metadata?.httpStatusCode >= 400 ? 'failed' : 'unknown';
+        metric('NotificationFailures');
+        if (status === 'unknown') metric('NotificationUnknown');
+        return { sent: false, simulated: false, status };
     }
 }
 

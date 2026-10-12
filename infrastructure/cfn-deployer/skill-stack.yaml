@@ -20,6 +20,12 @@ Parameters:
   BedrockModelId:
     Type: String
     Default: ''
+  BedrockResourceArns:
+    Type: CommaDelimitedList
+    Default: ''
+    AllowedPattern: '^$|^arn:[^:]+:bedrock:[^:]+:[0-9]*:(foundation-model|inference-profile|application-inference-profile)/[^*]+$'
+Conditions:
+  HasBedrock: !Not [!Equals [!Ref BedrockModelId, '']]
 Resources:
   AlexaSkillIAMRole:
     Type: AWS::IAM::Role
@@ -41,10 +47,6 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                  - logs:*
-                Resource: arn:aws:logs:*:*:*
-              - Effect: Allow
-                Action:
                   - dynamodb:PutItem
                   - dynamodb:Query
                 Resource: !GetAtt HealthMetricsTable.Arn
@@ -52,11 +54,18 @@ Resources:
                 Action:
                   - sns:Publish
                 Resource: !Ref CaregiverAlertsTopic
+              - !If
+                - HasBedrock
+                - Effect: Allow
+                  Action: bedrock:InvokeModel
+                  Resource: !Ref BedrockResourceArns
+                - !Ref AWS::NoValue
               - Effect: Allow
-                Action:
-                  - bedrock:InvokeModel
-                  - bedrock:InvokeModelWithResponseStream
-                Resource: '*'
+                Action: [kms:GenerateDataKey, kms:Decrypt]
+                Resource: !GetAtt NotificationKey.Arn
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub sns.${AWS::Region}.amazonaws.com
   AlexaSkillFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -71,6 +80,8 @@ Resources:
       Timeout: 60
       Environment:
         Variables:
+          ALEXA_SKILL_ID: !Ref SkillId
+          VOICE_TIMEOUT_MS: '1200'
           HEALTH_TABLE_NAME: !Ref HealthMetricsTable
           SNS_TOPIC_ARN: !Ref CaregiverAlertsTopic
           BEDROCK_MODEL_ID: !Ref BedrockModelId
@@ -94,6 +105,21 @@ Resources:
     Type: AWS::SNS::Topic
     Properties:
       DisplayName: CarePulse caregiver alerts
+      KmsMasterKeyId: !Ref NotificationKey
+  NotificationKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action: 'kms:*'
+            Resource: '*'
   AlexaSkillFunctionEventPermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -113,6 +139,17 @@ Resources:
     Properties:
       LogGroupName: !Sub /aws/lambda/${AlexaSkillFunction}
       RetentionInDays: 14
+  AlexaSkillLogPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: carepulse-log-writer
+      Roles: [!Ref AlexaSkillIAMRole]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: [logs:CreateLogStream, logs:PutLogEvents]
+            Resource: !GetAtt AlexaSkillFunctionLogGroup.Arn
 Outputs:
   SkillEndpoint:
     Description: LambdaARN for the regional endpoint

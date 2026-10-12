@@ -3,13 +3,14 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { beforeEach, test } = require('node:test');
+const { beforeEach, afterEach, mock, test } = require('node:test');
 const { handler } = require('../index');
 const { handler: mcpHttpHandler } = require('../mcp_http');
 const mcp = require('../care_service');
 const { renderVoiceObservation } = require('../voice_agent');
 
 beforeEach(() => {
+    mock.method(console, 'info', () => {});
     delete process.env.CARE_TABLE_NAME;
     delete process.env.SNS_TOPIC_ARN;
     delete process.env.DEMO_OWNER_ID;
@@ -18,6 +19,7 @@ beforeEach(() => {
     delete process.env.REQUIRE_BEDROCK;
     mcp.resetMockRecords();
 });
+afterEach(() => mock.restoreAll());
 
 function alexaRequest({ intentName, slots = {}, attributes = {}, userId = 'test-user', type = 'IntentRequest', supportedInterfaces = {} }) {
     const request = type === 'LaunchRequest'
@@ -89,22 +91,20 @@ test('MCP surface matches the CarePulse strategy', () => {
     ]);
 });
 
-test('deployed runtime refuses to continue without the required Bedrock model', async () => {
+test('voice remains available when Bedrock is not configured', async () => {
     process.env.REQUIRE_BEDROCK = 'true';
-    await assert.rejects(
-        () => renderVoiceObservation({
+    const speech = await renderVoiceObservation({
             memberName: 'Elena',
             signal: 'tiredness',
             comparison: { changeObserved: false, summary: 'No change observed.' }
-        }),
-        /BEDROCK_MODEL_ID is required/
-    );
+        });
+    assert.match(speech, /I recorded/);
 });
 
 test('MCP 2025-11-25 HTTP flow initializes a session and lists native tools', async () => {
     process.env.MCP_API_KEY = 'test-mcp-key';
     const initialize = await mcpHttpHandler({
-        headers: { 'x-carepulse-mcp-key': 'test-mcp-key' },
+        headers: { 'x-carepulse-mcp-key': 'test-mcp-key', 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
         requestContext: { http: { method: 'POST' } },
         body: JSON.stringify({
             jsonrpc: '2.0',
@@ -121,10 +121,16 @@ test('MCP 2025-11-25 HTTP flow initializes a session and lists native tools', as
     const sessionId = initialize.headers['mcp-session-id'];
     assert.ok(sessionId);
     assert.equal(JSON.parse(initialize.body).result.protocolVersion, '2025-11-25');
+    await mcpHttpHandler({
+        headers: { 'x-carepulse-mcp-key': 'test-mcp-key', 'mcp-session-id': sessionId, 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+        body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })
+    });
 
     const tools = await mcpHttpHandler({
         headers: {
             'x-carepulse-mcp-key': 'test-mcp-key',
+            'content-type': 'application/json',
+            accept: 'application/json, text/event-stream',
             'mcp-session-id': sessionId
         },
         requestContext: { http: { method: 'POST' } },
@@ -136,8 +142,8 @@ test('MCP 2025-11-25 HTTP flow initializes a session and lists native tools', as
 
 test('baseline comparison observes repeated signals without diagnosing', async () => {
     const input = { ownerId: 'owner-a', memberName: 'Elena', signal: 'tiredness', state: 'more than usual' };
-    await mcp.logWellnessEvent(input);
-    await mcp.logWellnessEvent(input);
+    await mcp.logWellnessEvent({ ...input, recordedAt: new Date(Date.now() - 86400000).toISOString() });
+    await mcp.logWellnessEvent({ ...input, recordedAt: new Date(Date.now() - 2 * 86400000).toISOString() });
     const comparison = await mcp.compareWithBaseline(input);
     assert.equal(comparison.changeObserved, true);
     assert.equal(comparison.repeatedCount, 2);

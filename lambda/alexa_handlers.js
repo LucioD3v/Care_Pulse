@@ -7,6 +7,7 @@ const {
     getCareContext,
     updateCarePreferences,
     getPendingFollowup,
+    getFollowupById,
     completeFollowup,
     evaluateAlertPolicy
 } = require('./care_service');
@@ -15,6 +16,7 @@ const { escapeSsml, localDateTime, addOneDay } = require('./voice_format');
 const { CARD_TITLES, CARD_CONTENT, ALERT_STATUS, COPY } = require('./voice_copy');
 const { createGetWellnessSummaryHandler } = require('./handlers/getWellnessSummaryHandler');
 const { grantBeeConsent, revokeBeeConsent, consentDays } = require('./bee_link');
+const { metric } = require('./observability');
 
 const STATES = {
     AWAITING_FOLLOWUP_CONFIRMATION: 'AWAITING_FOLLOWUP_CONFIRMATION',
@@ -83,18 +85,16 @@ function elicitSlot(handlerInput, slotName, prompt) {
         .getResponse();
 }
 
-async function tracedTool(name, input) {
+async function tracedTool(name, input, options) {
     const startedAt = Date.now();
-    const result = await callTool(name, input);
-    console.info(JSON.stringify({
-        event: 'mcp_tool_completed',
-        tool: name,
-        durationMs: Date.now() - startedAt,
-        ownerId: input.ownerId,
-        memberName: input.memberName,
-        outcome: result?.source || result?.reason || 'ok'
-    }));
-    return result;
+    try {
+        return await callTool(name, input, options);
+    } catch (error) {
+        metric('ToolErrors');
+        throw error;
+    } finally {
+        metric('ToolDuration', Date.now() - startedAt, 'Milliseconds');
+    }
 }
 
 async function ensureFollowup(handlerInput, { memberName, signal, dueTime }) {
@@ -168,11 +168,12 @@ const ReportWellnessIntentHandler = {
             details: sleepHours ? `${sleepHours} hours` : '',
             ...(sleepHours ? { numericValue: Number(sleepHours) } : {})
         });
+        handlerInput.attributesManager.getRequestAttributes().reportSaved = true;
         const comparison = await tracedTool('compare_with_baseline', {
             ownerId: userOwnerId,
             memberName,
             signal
-        });
+        }, { context });
         const observation = await renderVoiceObservation({ memberName, signal, comparison });
         if (context.followupOffers === 'off') {
             saveConversationState(handlerInput, { conversationState: null });
@@ -255,8 +256,10 @@ const CompleteFollowupIntentHandler = {
         const attributes = sessionAttributes(handlerInput);
         const memberName = getSlotValue(handlerInput, 'memberName') || attributes.memberName || defaultMemberName();
         const userOwnerId = ownerId(handlerInput);
-        const followup = await getPendingFollowup({ ownerId: userOwnerId, memberName });
-        if (!followup) {
+        const followup = attributes.followupId
+            ? await getFollowupById({ ownerId: userOwnerId, memberName, followupId: attributes.followupId })
+            : await getPendingFollowup({ ownerId: userOwnerId, memberName });
+        if (!followup || followup.status !== 'pending') {
             return speakText(handlerInput, COPY.noPending(memberName)).getResponse();
         }
         await tracedTool('log_wellness_event', {
@@ -288,8 +291,10 @@ const CompleteFollowupIntentHandler = {
                 consentId: decision.consentId,
                 authorized: true
             });
-            alertStatus = alert.sent ? ALERT_STATUS.sent(context.caregiverName) : ALERT_STATUS.simulated;
-            speech = alert.sent ? COPY.alertSent(context.caregiverName) : COPY.alertUnavailable(context.caregiverName);
+            alertStatus = alert.sent ? ALERT_STATUS.sent(context.caregiverName)
+                : alert.simulated ? ALERT_STATUS.simulated : ALERT_STATUS.failed;
+            speech = alert.sent ? COPY.alertSent(context.caregiverName)
+                : alert.status === 'unknown' ? COPY.alertUnknown(context.caregiverName) : COPY.alertUnavailable(context.caregiverName);
         } else if (decision.reason === 'consent_missing_or_expired') {
             alertStatus = ALERT_STATUS.noConsent;
             speech = COPY.noPermission;
@@ -510,13 +515,13 @@ const CatchAllExceptionHandler = {
         return true;
     },
     handle(handlerInput, error) {
-        console.error('CarePulse request failed:', error);
-        speakText(handlerInput, COPY.error);
+        metric('RequestErrors');
+        speakText(handlerInput, handlerInput.attributesManager.getRequestAttributes().reportSaved ? COPY.reportSavedError : COPY.error);
         return repromptText(handlerInput, COPY.error).getResponse();
     }
 };
 
-exports.handler = Alexa.SkillBuilders.custom()
+const skill = Alexa.SkillBuilders.custom()
     .addRequestHandlers(
         LaunchRequestHandler,
         ReportWellnessIntentHandler,
@@ -535,8 +540,10 @@ exports.handler = Alexa.SkillBuilders.custom()
         FallbackIntentHandler,
         SessionEndedRequestHandler
     )
-    .addErrorHandlers(CatchAllExceptionHandler)
-    .lambda();
+    .addErrorHandlers(CatchAllExceptionHandler);
+
+if (process.env.ALEXA_SKILL_ID) skill.withSkillId(process.env.ALEXA_SKILL_ID);
+exports.handler = skill.lambda();
 
 exports._private = { ownerId, localDateTime, followupSchedule, STATES };
 

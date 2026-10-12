@@ -18,6 +18,7 @@ const { grantBeeConsent, revokeBeeConsent, resolveBeeLink } = require('../bee_li
 const { handler } = require('../index');
 const { handler: mcpHttpHandler } = require('../mcp_http');
 const mcp = require('../care_service');
+const repository = require('../care_repository');
 
 beforeEach(() => {
     delete process.env.CARE_TABLE_NAME;
@@ -100,6 +101,8 @@ test('buildWellnessSnapshotPayload carries hasBeeData and falls back to No data'
     assert.equal(payload.signals.sleep.source, 'Bee 🐝');
     for (const name of ['energy', 'mood', 'appetite']) {
         assert.equal(payload.signals[name].value, 'No data');
+        assert.equal(payload.signals[name].intensityPercent, 0);
+        assert.equal(payload.signals[name].statusColor, '#A0A0A0');
     }
 });
 
@@ -108,6 +111,7 @@ test('wellnessSnapshotDirective uses the packaged template, identical to the ski
     assert.equal(directive.type, 'Alexa.Presentation.APL.RenderDocument');
     assert.equal(directive.document.version, '2024.3');
     assert.ok(directive.document.layouts.SignalRow && directive.document.layouts.BeeSourceBadge);
+    assert.match(JSON.stringify(directive.document), /"headerTitle":"CarePulse"/);
     const skillCopy = fs.readFileSync(path.join(__dirname, '..', '..', 'skill-package', 'assets', 'documents', 'wellnessSnapshot.json'), 'utf8');
     assert.deepEqual(directive.document, JSON.parse(skillCopy));
 });
@@ -187,7 +191,7 @@ test('ingestion stores only derived signals for the linked member', async () => 
     const history = await mcp.getWellnessHistory({ ownerId: 'bee-owner', memberName: 'Elena' });
     assert.equal(history.length, 3);
     assert.ok(history.every(event => event.provenance === 'bee' && event.beeConsentId));
-    assert.equal(history.find(event => event.signal === 'sleep').state, 'high');
+    assert.equal(history.find(event => event.signal === 'sleep').state, 'reported');
     assert.equal(history.find(event => event.signal === 'tiredness').state, 'high');
     assert.equal(history.find(event => event.signal === 'mood').state, 'moderate');
     assert.doesNotMatch(JSON.stringify(history), /exhausted|anxious|appointment|dizzy|appetite/);
@@ -208,6 +212,8 @@ test('re-ingesting the same Bee export is idempotent', async () => {
 
 test('ingestion uses the stored sleep baseline and rejects malformed exports', async () => {
     const linkCode = await linkedCode();
+    const context = await mcp.getCareContext({ ownerId: 'bee-owner', memberName: 'Elena' });
+    await repository.updateRecord(context.pk, context.sk, { baselineSleepHours: 7.5, baselineSource: 'member' });
     await ingestBeeContext({ linkCode, beeExport: { exportedAt: new Date().toISOString(), healthKit: { sleepHours: 7.2 } } });
     const [sleep] = await mcp.getWellnessHistory({ ownerId: 'bee-owner', memberName: 'Elena' });
     assert.equal(sleep.state, 'low'); // baseline 7.5 h
@@ -231,12 +237,15 @@ test('revoking Bee deletes Bee signals but keeps voice reports', async () => {
 test('MCP gateway ingests with a link code and cannot target another owner directly', async () => {
     process.env.MCP_API_KEY = 'test-mcp-key';
     const call = body => mcpHttpHandler({
-        headers: { 'x-carepulse-mcp-key': 'test-mcp-key', ...(body.sessionId ? { 'mcp-session-id': body.sessionId } : {}) },
+        headers: { 'x-carepulse-mcp-key': 'test-mcp-key', 'content-type': 'application/json',
+            accept: 'application/json, text/event-stream', 'mcp-protocol-version': '2025-11-25',
+            ...(body.sessionId ? { 'mcp-session-id': body.sessionId } : {}) },
         requestContext: { http: { method: 'POST' } },
         body: JSON.stringify({ jsonrpc: '2.0', id: body.id, method: body.method, params: body.params })
     });
     const init = await call({ id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 't', version: '1' } } });
     const sessionId = init.headers['mcp-session-id'];
+    await call({ sessionId, method: 'notifications/initialized' });
 
     const list = JSON.parse((await call({ sessionId, id: 2, method: 'tools/list', params: {} })).body);
     assert.deepEqual(list.result.tools.find(tool => tool.name === 'ingest_bee_context').inputSchema.required, ['linkCode', 'beeExport']);
@@ -324,4 +333,70 @@ test('bee_schema_report prints field structure without any values', () => {
     assert.match(output, /facts\[\]\.confirmed: boolean/);
     assert.match(output, /next_cursor: null/);
     assert.doesNotMatch(output, /secret|diagnosis|42/);
+});
+
+test('Bee readings without a verified routine stay neutral in the summary', async () => {
+    const linkCode = await linkedCode();
+    const context = await mcp.getCareContext({ ownerId: 'bee-owner', memberName: 'Elena' });
+    await repository.updateRecord(context.pk, context.sk, { baselineSleepHours: 8, baselineSource: 'unverified' });
+    await ingestBeeContext({ linkCode, beeExport: { exportedAt: new Date().toISOString(), healthKit: { sleepHours: 5 } } });
+    const history = await mcp.getWellnessHistory({ ownerId: 'bee-owner', memberName: 'Elena' });
+    assert.equal(history[0].state, 'reported');
+    assert.match(history[0].details, /no verified baseline/);
+    assert.equal(signalsFromHistory(history).sleep.intensityPercent, 0);
+    assert.equal(sleepIntensity(5, null), 'unknown');
+});
+
+test('summary includes Bee readings beyond the first history page', async () => {
+    const event = alexaRequest({ userId: 'paged-bee-summary', intentName: 'GetWellnessSummaryIntent',
+        supportedInterfaces: { 'Alexa.Presentation.APL': {} } });
+    const ownerId = require('../index')._private.ownerId({ requestEnvelope: event });
+    const linkCode = await linkedCode(ownerId);
+    await ingestBeeContext({ linkCode, beeExport: {
+        exportedAt: new Date(Date.now() - 3600000).toISOString(), healthKit: { sleepHours: 6 }
+    } });
+    for (let index = 0; index < 110; index++) {
+        await mcp.logWellnessEvent({ ownerId, memberName: 'Elena', signal: 'mood', state: 'reported' });
+    }
+    const response = await invokeAlexa(event);
+    const data = response.response.directives[0].datasources.wellnessData;
+    assert.equal(data.hasBeeData, true);
+    assert.equal(data.signals.sleep.value, '6 h');
+    assert.match(data.summaryLine, /111 reports/);
+    assert.match(response.response.outputSpeech.ssml, /111/);
+});
+
+test('Bee revocation deletes all pages and leaves other members and voice events intact', async () => {
+    const linkCode = await linkedCode();
+    for (let index = 0; index < 125; index++) {
+        await repository.putRecord({
+            pk: 'USER#bee-owner', sk: 'EVENT#elena#' + index, provenance: 'bee'
+        });
+    }
+    await repository.putRecord({ pk: 'USER#bee-owner', sk: 'EVENT#elena#voice', provenance: 'voice' });
+    await repository.putRecord({ pk: 'USER#bee-owner', sk: 'EVENT#elena-jane#bee', provenance: 'bee' });
+    assert.equal((await revokeBeeConsent({ ownerId: 'bee-owner', memberName: 'Elena' })).eventsDeleted, 125);
+    assert.equal((await repository.queryAllPrefix('USER#bee-owner', 'EVENT#')).length, 2);
+    await assert.rejects(() => resolveBeeLink(linkCode), /link code is invalid/);
+});
+
+test('malformed nested Bee input is rejected before saving any signals', async () => {
+    const linkCode = await linkedCode();
+    await assert.rejects(() => mcp.callTool('ingest_bee_context', {
+        linkCode, beeExport: { exportedAt: new Date().toISOString(),
+            conversations: [{ utterances: 'private text' }] }
+    }), /Invalid tool arguments/);
+    assert.equal((await repository.queryAllPrefix('USER#bee-owner', 'EVENT#')).length, 0);
+});
+
+test('schema report errors do not expose malformed transcript contents', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'bee-invalid-'));
+    t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+    const file = path.join(directory, 'invalid.json');
+    fs.writeFileSync(file, '{"text":"secret diagnosis" invalid}');
+    const result = require('node:child_process').spawnSync(process.execPath,
+        [path.join(__dirname, '..', '..', 'scripts', 'bee_schema_report.js'), file], { encoding: 'utf8' });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /valid JSON/);
+    assert.doesNotMatch(result.stdout + result.stderr, /secret|diagnosis|SyntaxError/);
 });

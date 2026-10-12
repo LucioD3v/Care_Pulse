@@ -1,8 +1,12 @@
 node_modules/
 package-lock.json
+!/lambda/package-lock.json
 .env
+.env.*
+!.env.example
 .serverless/
 .DS_Store
+artifacts/
 
 # LocalStack-only development files
 /compose.yaml
