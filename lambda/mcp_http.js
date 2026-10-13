@@ -7,7 +7,9 @@ const { createMcpSession, getMcpSession, deleteMcpSession } = require('./care_se
 const { updateRecord } = require('./care_repository');
 const { metric, withRequest } = require('./observability');
 const { InvalidBeeLinkError } = require('./bee_link');
-const VERSIONS = ['2025-11-25', '2025-06-18'];
+const { fromMcp, withPrincipal, currentPrincipal, AccessError } = require('./access_control');
+const { isDemo } = require('./runtime_config');
+const VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26'];
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
 function header(event, name) {
@@ -34,7 +36,7 @@ function validEnvelope(request) {
 }
 
 async function handle(event) {
-    if (!authorized(event)) return response(401, rpcError(null, -32001, 'Unauthorized MCP request.'));
+    if (isDemo() && !authorized(event)) return response(401, rpcError(null, -32001, 'Unauthorized MCP request.'));
     const origin = header(event, 'origin');
     const origins = (process.env.MCP_ALLOWED_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean);
     if (origin && !origins.includes(origin)) return response(403, rpcError(null, -32001, 'Origin is not allowed.'));
@@ -47,7 +49,7 @@ async function handle(event) {
 
     if (method === 'DELETE') {
         const session = await getMcpSession(sessionId);
-        if (!session) return response(404, rpcError(null, -32000, 'Unknown or expired session.'));
+        if (!session || session.ownerId !== currentPrincipal()?.ownerId) return response(404, rpcError(null, -32000, 'Unknown or expired session.'));
         if (suppliedVersion && suppliedVersion !== session.protocolVersion) return response(400, rpcError(null, -32602, 'Session protocol version mismatch.'));
         await deleteMcpSession(sessionId);
         return response(204);
@@ -79,7 +81,7 @@ async function handle(event) {
             return response(400, rpcError(request.id, -32602, 'Invalid initialization parameters.'));
         }
         const version = VERSIONS.includes(params.protocolVersion) ? params.protocolVersion : VERSIONS[0];
-        const session = await createMcpSession({ protocolVersion: version });
+        const session = await createMcpSession({ protocolVersion: version, ownerId: currentPrincipal()?.ownerId });
         return response(200, rpcResult(request.id, {
             protocolVersion: version, capabilities: { tools: { listChanged: false } },
             serverInfo: { name: 'carepulse-mcp', version: '1.1.0' },
@@ -87,7 +89,7 @@ async function handle(event) {
         }), { 'mcp-session-id': session.sessionId, 'mcp-protocol-version': version });
     }
     const session = await getMcpSession(sessionId);
-    if (!session) return response(404, rpcError(request.id, -32000, 'Unknown or expired session.'));
+    if (!session || session.ownerId !== currentPrincipal()?.ownerId) return response(404, rpcError(request.id, -32000, 'Unknown or expired session.'));
     const headers = { 'mcp-session-id': sessionId, 'mcp-protocol-version': session.protocolVersion };
     if (suppliedVersion && suppliedVersion !== session.protocolVersion) return response(400, rpcError(request.id, -32602, 'Session protocol version mismatch.'), headers);
     if (notification) {
@@ -96,12 +98,26 @@ async function handle(event) {
     }
     if (request.method === 'ping') return response(200, rpcResult(request.id, {}), headers);
     if (!session.initialized) return response(400, rpcError(request.id, -32000, 'Session initialization is incomplete.'), headers);
-    if (request.method === 'tools/list') return response(200, rpcResult(request.id, { tools: MCP_TOOLS }), headers);
+    if (request.method === 'tools/list') {
+        const catalog = isDemo() ? MCP_TOOLS : MCP_TOOLS.map(tool => {
+            const schema = structuredClone(tool.inputSchema);
+            delete schema.properties.ownerId;
+            schema.required = schema.required.filter(name => name !== 'ownerId');
+            return { ...tool, inputSchema: schema };
+        });
+        return response(200, rpcResult(request.id, { tools: catalog }), headers);
+    }
     if (request.method === 'tools/call') {
         const name = request.params?.name;
         if (!MCP_TOOLS.some(tool => tool.name === name)) return response(200, rpcError(request.id, -32602, 'Unknown tool.'), headers);
         try {
-            const result = await callMcpTool(name, request.params?.arguments);
+            const args = request.params?.arguments;
+            const principal = currentPrincipal();
+            if (!principal.demo && args?.ownerId && args.ownerId !== principal.ownerId) throw new AccessError();
+            const input = name === 'ingest_bee_context' ? args
+                : { ...args, ...(principal.ownerId ? { ownerId: principal.ownerId } : {}) };
+            const result = await withPrincipal({ ...principal, requestId: sessionId + ':' + request.id },
+                () => callMcpTool(name, input));
             const failed = name === 'ingest_bee_context' && result.success === false;
             metric(failed ? 'ToolErrors' : 'ToolSuccesses');
             return response(200, rpcResult(request.id, {
@@ -122,10 +138,12 @@ async function handle(event) {
 
 exports.handler = (event, context) => withRequest('mcp', context, 12000, async () => {
     try {
-        const result = await handle(event);
+        const principal = await fromMcp(event);
+        const result = await withPrincipal(principal, () => handle(event));
         if (result.statusCode >= 400) metric('HttpErrors');
         return result;
-    } catch {
+    } catch (error) {
+        if (error instanceof AccessError) return response(401, rpcError(null, -32001, 'Authentication or profile setup required.'));
         metric('ServiceErrors');
         return response(500, rpcError(null, -32603, 'Internal service error.'));
     }

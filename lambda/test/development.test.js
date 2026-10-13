@@ -116,10 +116,13 @@ test('context keys and households remain isolated', async () => {
 });
 
 test('consent lookup remains exact beyond 25 records and rejects expiry or another signal', async () => {
-    for (let i = 0; i < 35; i += 1) await care.requestConsent({
-        ...input, caregiverName: 'Laura', signal: 'tiredness', followupId: 'f-' + i
-    });
-    const query = { ...input, caregiverName: 'Laura', signal: 'tiredness', followupId: 'f-0' };
+    let first;
+    for (let i = 0; i < 35; i += 1) {
+        const followup = await care.createFollowup({ ...input, signal: 'tiredness', dueDate: '2030-10-10', dueTime: '18:00' });
+        first ||= followup.followupId;
+        await care.requestConsent({ ...input, caregiverName: 'Laura', signal: 'tiredness', followupId: followup.followupId });
+    }
+    const query = { ...input, caregiverName: 'Laura', signal: 'tiredness', followupId: first };
     const consent = await care.findActiveConsent(query);
     assert.ok(consent);
     assert.equal(await care.findActiveConsent({ ...query, signal: 'sleep' }), null);
@@ -225,8 +228,9 @@ test('a downstream failure after a write confirms the saved report without askin
     process.env.CARE_TABLE_NAME = 'test';
     let writes = 0;
     mock.method(DynamoDBDocumentClient.prototype, 'send', async command => {
-        if (command.constructor.name === 'GetCommand') return { Item: { ...command.input.Key, memberName: 'Elena', caregiverName: 'Laura', timezone: 'UTC', baselineSleepHours: null } };
-        if (command.constructor.name === 'PutCommand') { writes += 1; return {}; }
+        if (command.constructor.name === 'GetCommand') return command.input.Key.sk.startsWith('OPERATION#') ? {}
+            : { Item: { ...command.input.Key, memberName: 'Elena', caregiverName: 'Laura', timezone: 'UTC', baselineSleepHours: null } };
+        if (command.constructor.name === 'TransactWriteCommand') { writes += 1; return {}; }
         throw new Error('comparison dependency unavailable');
     });
     const result = await alexa({

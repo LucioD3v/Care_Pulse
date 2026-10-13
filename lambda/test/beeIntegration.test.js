@@ -142,7 +142,7 @@ test('extractSignalsFromText derives intensity from keywords', () => {
     const intensity = text => extractSignalsFromText([text])[0].intensity;
     assert.equal(intensity('I am completely exhausted'), 'high');
     assert.equal(intensity('I feel very tired'), 'moderate');
-    assert.equal(intensity('I am tired'), 'low');
+    assert.equal(intensity('I am tired'), 'reported');
 });
 
 test('selectWearerTexts keeps only the wearer and confirmed facts', () => {

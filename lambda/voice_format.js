@@ -37,4 +37,12 @@ function spokenTime(timeText) {
     return `${hour}${minuteText} ${hours < 12 ? 'AM' : 'PM'}`;
 }
 
-module.exports = { escapeSsml, localDateTime, addOneDay, spokenTime };
+function spokenSchedule(dueDate, dueTime, nowDate, timeZone) {
+    const today = localDateTime(nowDate, timeZone).date;
+    const day = dueDate === today ? 'today' : dueDate === addOneDay(today) ? 'tomorrow'
+        : new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'long', day: 'numeric' })
+            .format(new Date(`${dueDate}T12:00:00Z`));
+    return `${day} at ${spokenTime(dueTime)}`;
+}
+
+module.exports = { escapeSsml, localDateTime, addOneDay, spokenTime, spokenSchedule };

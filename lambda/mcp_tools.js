@@ -86,8 +86,7 @@ const MCP_TOOLS = [
             signal: { type: 'string' },
             followupStatus: { type: 'string', enum: ['same', 'worse'] },
             consentId: { type: 'string' },
-            authorized: { type: 'boolean', const: true }
-        }, ['ownerId', 'memberName', 'caregiverName', 'signal', 'followupStatus', 'consentId', 'authorized'])
+        }, ['ownerId', 'memberName', 'caregiverName', 'signal', 'followupStatus', 'consentId'])
     },
     {
         name: 'ingest_bee_context',
@@ -100,6 +99,7 @@ const MCP_TOOLS = [
                     type: 'object',
                     properties: {
                         exportedAt: { type: 'string', format: 'date-time' },
+                        sourceId: { type: 'string', minLength: 1, maxLength: 200 },
                         facts: {
                             type: 'array',
                             maxItems: 100,
@@ -149,6 +149,20 @@ const MCP_TOOLS = [
         }
     }
 ];
+
+for (const [name, description, extra, required] of [
+    ['list_followups', 'List pending check-ins for the authorized member.', {}, []],
+    ['complete_followup', 'Record a specific check-in result once. This does not prove an alert was delivered.',
+        { followupId: { type: 'string' }, status: { type: 'string', enum: ['better', 'same', 'worse'] } }, ['followupId', 'status']],
+    ['cancel_followup', 'Cancel one pending check-in and revoke its sharing permission.',
+        { followupId: { type: 'string' } }, ['followupId']],
+    ['revoke_consent', 'Withdraw sharing permission for one check-in. An alert already being sent cannot be recalled.',
+        { followupId: { type: 'string' } }, ['followupId']]
+]) {
+    MCP_TOOLS.push({ name, description, inputSchema: objectSchema({
+        ownerId: { type: 'string' }, memberName: { type: 'string' }, ...extra
+    }, ['ownerId', 'memberName', ...required]) });
+}
 
 const text = { type: 'string' };
 const number = { type: 'number' };
@@ -201,12 +215,16 @@ const outputs = {
         sent: { type: 'boolean' }, simulated: { type: 'boolean' }, status: text, messageId: text
     }, ['sent', 'simulated', 'status'])
 };
+outputs.list_followups = objectSchema({ followups: { type: 'array', items: outputs.create_followup } }, ['followups']);
+outputs.complete_followup = outputs.create_followup;
+outputs.cancel_followup = outputs.create_followup;
+outputs.revoke_consent = objectSchema({ revoked: { type: 'boolean' }, mayHaveBeenSent: { type: 'boolean' } }, ['revoked', 'mayHaveBeenSent']);
 for (const tool of MCP_TOOLS) {
     tool.outputSchema = outputs[tool.name];
     tool.annotations = {
         // Reads may initialize a missing care context.
         readOnlyHint: false,
-        destructiveHint: false,
+        destructiveHint: ['cancel_followup', 'revoke_consent'].includes(tool.name),
         idempotentHint: ['get_care_context', 'get_wellness_history', 'compare_with_baseline'].includes(tool.name),
         openWorldHint: tool.name === 'send_caregiver_alert'
     };

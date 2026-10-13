@@ -3,12 +3,11 @@
 const { createHash, randomInt, randomUUID } = require('node:crypto');
 const {
     partitionKey,
-    putRecord,
     getRecord,
-    deleteRecord,
-    updateRecord,
-    queryAllPrefix
+    queryAllPrefix,
+    commit
 } = require('./care_repository');
+const { authorizeMember } = require('./access_control');
 
 const LINK_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const LINK_CODE_LENGTH = 8;
@@ -53,28 +52,31 @@ async function getBeeConsent({ ownerId, memberName }) {
     return consent && consent.status === 'active' && consent.expiresAt > now ? consent : null;
 }
 
-async function deleteBeeEvents({ ownerId, memberName }) {
+async function deleteBeeEvents({ ownerId, memberName, consentId }) {
     const pk = partitionKey(ownerId);
     const events = await queryAllPrefix(pk, `EVENT#${memberKey(memberName)}#`);
     const beeEvents = events.filter(event => event.provenance === 'bee');
     for (const event of beeEvents) {
-        await deleteRecord(pk, event.sk);
+        // The consent generation and revoking state must still hold at every deletion.
+        await commit({
+            checks: [{ pk, sk: consentSortKey(memberName), equals: { consentId, status: 'revoking' } }],
+            deletes: [{ pk, sk: event.sk }]
+        });
     }
     return beeEvents.length;
 }
 
 async function grantBeeConsent({ ownerId, memberName }) {
+    authorizeMember(ownerId, memberName, true);
     const pk = partitionKey(ownerId);
     const previous = await getRecord(pk, consentSortKey(memberName));
-    if (previous?.linkHash) {
-        await deleteRecord(`BEELINK#${previous.linkHash}`, 'LINK');
-    }
+    if (previous?.status === 'revoking') throw new Error('Bee deletion must finish before linking again.');
     const linkCode = generateLinkCode();
     const hash = linkHash(linkCode);
     const consentId = randomUUID();
     const grantedAt = new Date().toISOString();
     const expiresAt = Math.floor(Date.now() / 1000) + consentDays() * 24 * 60 * 60;
-    await putRecord({
+    const consent = {
         pk,
         sk: consentSortKey(memberName),
         entityType: 'BEE_CONSENT',
@@ -85,8 +87,8 @@ async function grantBeeConsent({ ownerId, memberName }) {
         linkHash: hash,
         grantedAt,
         expiresAt
-    });
-    await putRecord({
+    };
+    const link = {
         pk: `BEELINK#${hash}`,
         sk: 'LINK',
         entityType: 'BEE_LINK',
@@ -94,6 +96,13 @@ async function grantBeeConsent({ ownerId, memberName }) {
         memberName,
         consentId,
         expiresAt
+    };
+    await commit({
+        puts: [
+            { item: consent, ...(previous ? { equals: { consentId: previous.consentId, status: previous.status } } : { absent: true }) },
+            { item: link, absent: true }
+        ],
+        deletes: previous?.linkHash ? [{ pk: 'BEELINK#' + previous.linkHash, sk: 'LINK' }] : []
     });
     return { linkCode, consentId, expiresAt };
 }
@@ -112,20 +121,26 @@ async function resolveBeeLink(linkCode) {
     if (!consent || consent.linkHash !== hash || consent.consentId !== link.consentId) {
         throw invalid;
     }
-    return { ownerId: link.ownerId, memberName: link.memberName, consentId: consent.consentId };
+    authorizeMember(link.ownerId, link.memberName, true);
+    return { ownerId: link.ownerId, memberName: link.memberName, consentId: consent.consentId,
+        consentCheck: { pk: consent.pk, sk: consent.sk, equals: { status: 'active', consentId: consent.consentId },
+            after: { expiresAt: Math.floor(Date.now() / 1000) } } };
 }
 
 async function revokeBeeConsent({ ownerId, memberName }) {
+    authorizeMember(ownerId, memberName, true);
     const pk = partitionKey(ownerId);
     const consent = await getRecord(pk, consentSortKey(memberName));
     const wasActive = consent?.status === 'active';
-    if (consent?.linkHash) {
-        await deleteRecord(`BEELINK#${consent.linkHash}`, 'LINK');
-    }
-    if (wasActive) {
-        await updateRecord(pk, consent.sk, { status: 'revoked', revokedAt: new Date().toISOString(), linkHash: null });
-    }
-    const eventsDeleted = await deleteBeeEvents({ ownerId, memberName });
+    if (!consent) return { revoked: false, eventsDeleted: 0 };
+    const revoking = { ...consent, status: 'revoking', revokedAt: new Date().toISOString(), linkHash: null };
+    await commit({
+        puts: [{ item: revoking, equals: { consentId: consent.consentId, status: consent.status } }],
+        deletes: consent.linkHash ? [{ pk: 'BEELINK#' + consent.linkHash, sk: 'LINK' }] : []
+    });
+    const eventsDeleted = await deleteBeeEvents({ ownerId, memberName, consentId: consent.consentId });
+    await commit({ puts: [{ item: { ...revoking, status: 'revoked' },
+        equals: { consentId: consent.consentId, status: 'revoking' } }] });
     return { revoked: wasActive, eventsDeleted };
 }
 

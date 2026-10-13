@@ -37,7 +37,7 @@ CARE_TABLE_NAME="YOUR_TABLE" AWS_REGION="us-east-1" node lambda/backfill_followu
 
 The first command is a dry run. The second adds index fields and references using conditional transactions; it does not overwrite a follow-up completed concurrently. Run it with a migration role that can scan, read, update, and put records in the selected table. It reports counts only. Ambiguous or nonexistent local due times stop the migration and require review. Until backfill is complete, overdue metrics cover indexed records only.
 
-The ASK CloudFormation template still uses the earlier health-table schema. Its permissions, SNS encryption, and Skill ID checks are improved here, but its schema migration remains DEV-C03. Use the documented Serverless care-state deployment for the current runtime.
+The ASK CloudFormation template now adds a separate `CarePulseTable` with the runtime's `pk/sk` schema, `PendingFollowups` index, TTL, encryption, and point-in-time recovery, and binds `CARE_TABLE_NAME` to it. The earlier `HealthMetricsTable` and its adapter permissions remain intact. Existing health records are not automatically migrated. Validate a deployment change set and the new table before closing cloud acceptance for DEV-C03.
 
 ## MCP contract
 
@@ -71,7 +71,7 @@ The initial conflict resolution left the existing dashboard disconnected and nar
 
 Bee numeric sleep readings contribute to the same distinct-local-day comparison as voice readings. Keyword-derived low/moderate/high intensity is not converted into a claim that a member feels worse than usual. A single-reading APL intensity describes distance from a verified baseline; it is separate from the multi-day comparison rule.
 
-Existing Bee records are not rewritten by this integration. Previously derived sleep classifications need a separately reviewed migration if they must be recalculated. The team's keyword extractor still does not resolve negation or third-person references, and event identity still uses timestamp plus signal rather than a Bee source ID. Concurrent ingestion and revocation also need a transactional consent check before real-data use. These remain follow-up work under the critical data-integrity, consent, and safety items; this integration does not close them.
+Existing Bee records are not rewritten by this integration. Previously derived sleep classifications need a separately reviewed migration if they must be recalculated. The keyword extractor still does not resolve negation or third-person references; use reviewed synthetic examples for the demo. New event keys include a hashed Bee source ID (or export fingerprint), timestamp, and signal, so distinct source records at the same timestamp remain distinct. Every ingestion write transaction checks the active consent generation and expiry. Revocation moves consent to `revoking`, invalidates the link atomically, deletes Bee events with generation checks, and then marks it `revoked`. Relinking is blocked during deletion; retry an interrupted unlink to finish it.
 
 **Validation:** Node 22 clean installation passed all 85 tests, including the nested integration suite. Production-only installation and loading all entry points from the extracted Lambda ZIP also passed through `scripts/verify-clean-install.js`. No deployment or real-device validation was performed.
 
@@ -100,4 +100,21 @@ For a notification alarm:
 3. For unknown outcomes, reconcile provider acceptance before resending; loss of the response can occur after acceptance.
 4. Before any operator-approved retry, revalidate the exact consent, follow-up, and recipient. A failed or unknown notification is never represented as a simulated success.
 
-Automatic durable retries and an outbox remain DEV-C06. No retry worker was added to this change, so neither the runtime nor this runbook promises eventual delivery. Measure deployed latency, verify encrypted SNS acceptance, exercise the alarms, and validate the monitor after migration before closing the operational acceptance criteria.
+Completion now commits its result, wellness event, and any alert outbox record in one transaction. Requests are deduplicated, and an alert can be claimed by only one publisher. Known rejected or unconfigured attempts can be explicitly retried up to three attempts after revalidating consent. Server errors, timeouts, and lost responses are treated as unknown acceptance. `accepted` is reused without publishing again. `sending` after an interrupted invocation and `unknown` require provider reconciliation and are not automatically resent. No automatic retry worker is installed, so eventual delivery remains open under DEV-C06. Measure deployed latency, verify encrypted SNS acceptance, exercise the alarms, and validate the monitor before closing cloud acceptance.
+
+## Critical changes: hackathon scope
+
+This iteration targets a synthetic-data demo. Public privacy/terms documents, S3 publication, production onboarding, and identity-provider provisioning are deferred at the project owner's request. No cloud resources or external notifications were created during local verification.
+
+Validation: clean Node.js 22 installation, 117 passing tests, production-only dependency installation, ZIP creation, and extracted Lambda entry-point loading. The critical suite adds 32 tests; device/model-build and AWS acceptance are separate.
+
+- Templates explicitly use `CARE_MODE=demo`; the runtime never silently assumes demo mode. Local memory storage also requires `CARE_STORAGE_MODE=memory`, and is rejected inside AWS Lambda. A missing care table is an error in a deployed function.
+- `DEMO_OWNER_ID` is a shared synthetic household, used by both ASK and MCP when configured. The demo key is privileged; do not give it to untrusted clients. Missing Alexa identity is rejected. Default Elena/Laura profiles are created only in explicit demo mode.
+- Alert authorization is enforced in the domain service. A fabricated boolean, consent ID, other signal, expired/revoked consent, pending result, or changed caregiver binding cannot authorize publication. Consent is tied to one pending follow-up; replacing its caregiver revokes the old binding.
+- `stop sharing my reports` revokes sharing for the member's existing follow-ups; `what will you share` explains its scope. A No during the sharing prompt also revokes a previous permission. An alert already claimed for publication cannot be recalled, and the revocation result reports that limitation.
+- The MCP catalog adds exact-ID list/complete/cancel/revoke operations. Direct MCP consent creation remains restricted to trusted demo clients; a production tool call cannot claim the person's affirmative confirmation.
+- ASK now has a manual dialog model and validates signal/status/time/numeric values. Missing intensity stays `reported`. Follow-up confirmations give the stored date/time and explicitly require reopening the skill; no reminder or proactive conversation is scheduled.
+
+The unused production foundation verifies signed access tokens, issuer, resource audience, expiry, and scope, then loads an approved identity binding and member roles. It also requires a verified caregiver destination, allowed topic, and exactly one matching SNS subscription. Provisioning, IAM for individual destinations, protection against subscription changes, a secure member onboarding flow, and live Alexa+ validation are still required; this foundation does not make the demo production-ready.
+
+For a future AWS implementation, start with **Amazon Cognito User Pools** as the OAuth authorization service, using authorization code with PKCE S256 and refresh tokens. Keep the Alexa+ service-token and user-token flows separate. Cognito supports these OAuth capabilities, but the full Alexa+ metadata, resource binding, redirects, and two-tier integration must be validated before adopting it. This is a future recommendation, not infrastructure added for the hackathon. [Cognito authorization endpoint](https://docs.aws.amazon.com/cognito/latest/developerguide/authorization-endpoint.html), [Alexa+ MCP authentication](https://developer.amazon.com/docs/alexaplus/add-ons/mcp-toolkit-authentication.html).
