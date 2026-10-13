@@ -68,13 +68,28 @@
           "samples": [
             "I feel {followupStatus}",
             "I am {followupStatus}",
-            "I still feel the same",
-            "I am feeling better now",
-            "I feel worse",
+            "I still feel {followupStatus}",
+            "I am feeling {followupStatus} now",
             "{memberName} feels {followupStatus}",
             "complete my check in as {followupStatus}"
           ]
         },
+        { "name": "ListFollowupsIntent", "slots": [{ "name": "memberName", "type": "AMAZON.Person" }],
+          "samples": ["list my check ins", "what check ins do I have", "list check ins for {memberName}"] },
+        { "name": "CancelFollowupIntent", "slots": [{ "name": "memberName", "type": "AMAZON.Person" }],
+          "samples": ["cancel my check in", "cancel that check in", "cancel the check in for {memberName}"] },
+        { "name": "RescheduleFollowupIntent", "slots": [
+          { "name": "memberName", "type": "AMAZON.Person" },
+          { "name": "followupTime", "type": "AMAZON.TIME" }
+        ], "samples": ["move my check in to {followupTime}", "reschedule my check in", "make it {followupTime} instead", "move it to {followupTime}", "move the check in for {memberName} to {followupTime}"] },
+        { "name": "SelectFollowupIntent", "slots": [{ "name": "choice", "type": "AMAZON.NUMBER" }],
+          "samples": ["number {choice}", "check in number {choice}", "the {choice} one"] },
+        { "name": "CorrectReportIntent", "slots": [
+          { "name": "memberName", "type": "AMAZON.Person" },
+          { "name": "wellnessSignal", "type": "WELLNESS_SIGNAL" },
+          { "name": "intensity", "type": "WELLNESS_INTENSITY" },
+          { "name": "sleepHours", "type": "AMAZON.NUMBER" }
+        ], "samples": ["no I slept {sleepHours} hours", "it was {sleepHours} hours", "correct my last report to {sleepHours} hours", "I meant {wellnessSignal}", "that report was for {memberName}", "I meant {intensity} {wellnessSignal}"] },
         {
           "name": "GetWellnessSummaryIntent",
           "slots": [
@@ -91,12 +106,17 @@
             "what changed this week"
           ]
         },
+        { "name": "GetWellnessDetailsIntent", "slots": [
+          { "name": "memberName", "type": "AMAZON.Person" },
+          { "name": "timeframe", "type": "TIMEFRAME" }
+        ], "samples": ["give me more wellness details", "tell me the details", "what signals were recorded {timeframe}", "give me detailed wellness information for {memberName}"] },
         {
           "name": "SetCarePreferencesIntent",
           "slots": [
             { "name": "summaryLength", "type": "SUMMARY_LENGTH" },
             { "name": "preferredFollowupTime", "type": "AMAZON.TIME" },
-            { "name": "followupOffers", "type": "FOLLOWUP_OFFERS" }
+            { "name": "followupOffers", "type": "FOLLOWUP_OFFERS" },
+            { "name": "discreetMode", "type": "FOLLOWUP_OFFERS" }
           ],
           "samples": [
             "use {summaryLength} summaries",
@@ -104,7 +124,9 @@
             "set my follow up time to {preferredFollowupTime}",
             "make {preferredFollowupTime} my usual check in time",
             "turn {followupOffers} follow up suggestions",
-            "set follow up suggestions to {followupOffers}"
+            "set follow up suggestions to {followupOffers}",
+            "turn discreet mode {discreetMode}",
+            "set discreet mode to {discreetMode}"
           ]
         },
         {
@@ -146,9 +168,12 @@
         { "name": "AMAZON.NoIntent", "samples": [] },
         { "name": "AMAZON.CancelIntent", "samples": [] },
         { "name": "AMAZON.HelpIntent", "samples": [] },
+        { "name": "AMAZON.RepeatIntent", "samples": [] },
         { "name": "AMAZON.StopIntent", "samples": [] },
         { "name": "AMAZON.NavigateHomeIntent", "samples": [] },
-        { "name": "AMAZON.FallbackIntent", "samples": [] }
+        { "name": "AMAZON.FallbackIntent", "samples": [] },
+        {"name":"RevokeSharingIntent","slots":[],"samples":["stop sharing my reports","withdraw my sharing permission","revoke caregiver sharing"]},
+        {"name":"ExplainSharingIntent","slots":[],"samples":["what will you share","what will you tell my caregiver"]}
       ],
       "types": [
         {
@@ -198,6 +223,131 @@
           "values": [
             { "name": { "value": "on", "synonyms": ["enabled"] } },
             { "name": { "value": "off", "synonyms": ["disabled"] } }
+          ]
+        }
+      ]
+    },
+    "dialog": {
+      "delegationStrategy": "SKILL_RESPONSE",
+      "intents": [
+        {
+          "name": "ReportWellnessIntent",
+          "confirmationRequired": false,
+          "slots": [
+            {
+              "name": "memberName",
+              "type": "AMAZON.Person",
+              "elicitationRequired": false,
+              "confirmationRequired": false
+            },
+            {
+              "name": "wellnessSignal",
+              "type": "WELLNESS_SIGNAL",
+              "elicitationRequired": false,
+              "confirmationRequired": false
+            },
+            {
+              "name": "intensity",
+              "type": "WELLNESS_INTENSITY",
+              "elicitationRequired": false,
+              "confirmationRequired": false
+            },
+            {
+              "name": "sleepHours",
+              "type": "AMAZON.NUMBER",
+              "elicitationRequired": false,
+              "confirmationRequired": false
+            }
+          ]
+        },
+        {
+          "name": "CompleteFollowupIntent",
+          "confirmationRequired": false,
+          "slots": [
+            {
+              "name": "memberName",
+              "type": "AMAZON.Person",
+              "elicitationRequired": false,
+              "confirmationRequired": false
+            },
+            {
+              "name": "followupStatus",
+              "type": "FOLLOWUP_STATUS",
+              "elicitationRequired": false,
+              "confirmationRequired": false
+            }
+          ]
+        },
+        {
+          "name": "ScheduleFollowupIntent",
+          "confirmationRequired": false,
+          "slots": [
+            {
+              "name": "memberName",
+              "type": "AMAZON.Person",
+              "elicitationRequired": false,
+              "confirmationRequired": false
+            },
+            {
+              "name": "wellnessSignal",
+              "type": "WELLNESS_SIGNAL",
+              "elicitationRequired": false,
+              "confirmationRequired": false
+            },
+            {
+              "name": "followupTime",
+              "type": "AMAZON.TIME",
+              "elicitationRequired": false,
+              "confirmationRequired": false
+            }
+          ]
+        },
+        {
+          "name": "SetCarePreferencesIntent",
+          "confirmationRequired": false,
+          "slots": [
+            {
+              "name": "summaryLength",
+              "type": "SUMMARY_LENGTH",
+              "elicitationRequired": false,
+              "confirmationRequired": false
+            },
+            {
+              "name": "preferredFollowupTime",
+              "type": "AMAZON.TIME",
+              "elicitationRequired": false,
+              "confirmationRequired": false
+            },
+            {
+              "name": "followupOffers",
+              "type": "FOLLOWUP_OFFERS",
+              "elicitationRequired": false,
+              "confirmationRequired": false
+            },
+            {
+              "name": "discreetMode",
+              "type": "FOLLOWUP_OFFERS",
+              "elicitationRequired": false,
+              "confirmationRequired": false
+            }
+          ]
+        },
+        {
+          "name": "RescheduleFollowupIntent",
+          "confirmationRequired": false,
+          "slots": [
+            { "name": "memberName", "type": "AMAZON.Person", "elicitationRequired": false, "confirmationRequired": false },
+            { "name": "followupTime", "type": "AMAZON.TIME", "elicitationRequired": false, "confirmationRequired": false }
+          ]
+        },
+        {
+          "name": "CorrectReportIntent",
+          "confirmationRequired": false,
+          "slots": [
+            { "name": "memberName", "type": "AMAZON.Person", "elicitationRequired": false, "confirmationRequired": false },
+            { "name": "wellnessSignal", "type": "WELLNESS_SIGNAL", "elicitationRequired": false, "confirmationRequired": false },
+            { "name": "intensity", "type": "WELLNESS_INTENSITY", "elicitationRequired": false, "confirmationRequired": false },
+            { "name": "sleepHours", "type": "AMAZON.NUMBER", "elicitationRequired": false, "confirmationRequired": false }
           ]
         }
       ]

@@ -3,6 +3,7 @@
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
 const { DynamoDBDocumentClient, PutCommand, QueryCommand, UpdateCommand, GetCommand, DeleteCommand, TransactWriteCommand } = require('@aws-sdk/lib-dynamodb');
 const { sendWithBudget } = require('./observability');
+const { useMemory } = require('./runtime_config');
 
 const dynamoClient = DynamoDBDocumentClient.from(new DynamoDBClient({
     region: process.env.AWS_REGION || 'us-east-1', maxAttempts: 2
@@ -16,7 +17,7 @@ function partitionKey(ownerId) {
 }
 
 async function putRecord(item) {
-    if (process.env.CARE_TABLE_NAME) {
+    if (!useMemory()) {
         await sendWithBudget(dynamoClient, new PutCommand({ TableName: process.env.CARE_TABLE_NAME, Item: item }));
     } else {
         mockRecords.set(keyOf(item.pk, item.sk), structuredClone(item));
@@ -24,8 +25,20 @@ async function putRecord(item) {
     return { ...item, source: process.env.CARE_TABLE_NAME ? 'dynamodb' : 'mock' };
 }
 
-async function putRecordIfAbsent(item) {
-    if (process.env.CARE_TABLE_NAME) {
+async function putRecordIfAbsent(item, { checks = [] } = {}) {
+    if (checks.length) {
+        try {
+            await commit({ checks, puts: [{ item, absent: true }] });
+            return true;
+        } catch (error) {
+            if (!isConflict(error)) throw error;
+            // A duplicate is successful only while its authorization is still valid.
+            await commit({ checks });
+            if (await getRecord(item.pk, item.sk)) return false;
+            throw error;
+        }
+    }
+    if (!useMemory()) {
         try {
             await sendWithBudget(dynamoClient, new PutCommand({
                 TableName: process.env.CARE_TABLE_NAME, Item: item,
@@ -48,7 +61,7 @@ async function queryAllPrefix(pk, prefix) {
 }
 
 async function putRecords(items) {
-    if (process.env.CARE_TABLE_NAME) {
+    if (!useMemory()) {
         await sendWithBudget(dynamoClient, new TransactWriteCommand({
             TransactItems: items.map(Item => ({ Put: { TableName: process.env.CARE_TABLE_NAME, Item } }))
         }));
@@ -60,7 +73,7 @@ async function putRecords(items) {
 async function queryPage(pk, prefix, { limit = 100, cursor, ascending = false, from, to, indexName } = {}) {
     const pkName = indexName ? 'pendingPartition' : 'pk';
     const skName = indexName ? 'dueAt' : 'sk';
-    if (process.env.CARE_TABLE_NAME) {
+    if (!useMemory()) {
         const range = from !== undefined && to !== undefined;
         const result = await sendWithBudget(dynamoClient, new QueryCommand({
             TableName: process.env.CARE_TABLE_NAME,
@@ -97,7 +110,7 @@ async function queryPrefix(pk, prefix, limit = Infinity, options = {}) {
 }
 
 async function updateRecord(pk, sk, values, remove = []) {
-    if (process.env.CARE_TABLE_NAME) {
+    if (!useMemory()) {
         const names = {};
         const expressionValues = {};
         const assignments = Object.entries(values).map(([key, value], index) => {
@@ -123,7 +136,7 @@ async function updateRecord(pk, sk, values, remove = []) {
 }
 
 async function getRecord(pk, sk) {
-    if (process.env.CARE_TABLE_NAME) {
+    if (!useMemory()) {
         const result = await sendWithBudget(dynamoClient, new GetCommand({
             TableName: process.env.CARE_TABLE_NAME, Key: { pk, sk }, ConsistentRead: true
         }));
@@ -133,7 +146,7 @@ async function getRecord(pk, sk) {
 }
 
 async function deleteRecord(pk, sk) {
-    if (process.env.CARE_TABLE_NAME) {
+    if (!useMemory()) {
         await sendWithBudget(dynamoClient, new DeleteCommand({ TableName: process.env.CARE_TABLE_NAME, Key: { pk, sk } }));
     } else {
         mockRecords.delete(keyOf(pk, sk));
@@ -142,4 +155,58 @@ async function deleteRecord(pk, sk) {
 
 function resetMockRecords() { mockRecords.clear(); }
 
-module.exports = { partitionKey, putRecordIfAbsent, queryAllPrefix, putRecord, putRecords, queryPage, queryPrefix, updateRecord, getRecord, deleteRecord, resetMockRecords };
+function isConflict(error) {
+    return error.name === 'ConditionalCheckFailedException'
+        || (error.name === 'TransactionCanceledException'
+            && error.CancellationReasons?.some(reason => reason.Code === 'ConditionalCheckFailed'));
+}
+
+function condition({ equals = {}, after = {}, absent = false, missing = [] }) {
+    const names = {}, values = {}, terms = [];
+    if (absent) terms.push('attribute_not_exists(pk)');
+    for (const field of missing) {
+        const alias = '#c' + Object.keys(names).length;
+        names[alias] = field;
+        terms.push('attribute_not_exists(' + alias + ')');
+    }
+    for (const [operator, fields] of [['=', equals], ['>', after]]) {
+        for (const [field, value] of Object.entries(fields)) {
+            const index = Object.keys(names).length;
+            names['#c' + index] = field;
+            values[':c' + index] = value;
+            terms.push('#c' + index + ' ' + operator + ' :c' + index);
+        }
+    }
+    return terms.length ? {
+        ConditionExpression: terms.join(' AND '),
+        ...(Object.keys(names).length ? { ExpressionAttributeNames: names } : {}),
+        ...(Object.keys(values).length ? { ExpressionAttributeValues: values } : {})
+    } : {};
+}
+
+async function commit({ checks = [], puts = [], deletes = [] }) {
+    if (!useMemory()) {
+        const TableName = process.env.CARE_TABLE_NAME;
+        await sendWithBudget(dynamoClient, new TransactWriteCommand({
+            TransactItems: [
+                ...checks.map(({ pk, sk, ...expected }) => ({ ConditionCheck: { TableName, Key: { pk, sk }, ...condition(expected) } })),
+                ...puts.map(({ item, ...expected }) => ({ Put: { TableName, Item: item, ...condition(expected) } })),
+                ...deletes.map(({ pk, sk, ...expected }) => ({ Delete: { TableName, Key: { pk, sk }, ...condition(expected) } }))
+            ]
+        }));
+        return;
+    }
+    for (const entry of [...checks, ...puts, ...deletes]) {
+        const key = entry.item || entry;
+        const record = mockRecords.get(keyOf(key.pk, key.sk));
+        const failed = (entry.absent && record)
+            || (entry.missing || []).some(field => record?.[field] !== undefined)
+            || Object.entries(entry.equals || {}).some(([field, value]) => record?.[field] !== value)
+            || Object.entries(entry.after || {}).some(([field, value]) => !(record?.[field] > value));
+        if (failed) throw Object.assign(new Error('Concurrent state change.'), { name: 'ConditionalCheckFailedException' });
+    }
+    for (const { item } of puts) mockRecords.set(keyOf(item.pk, item.sk), structuredClone(item));
+    for (const { pk, sk } of deletes) mockRecords.delete(keyOf(pk, sk));
+}
+
+module.exports = { partitionKey, putRecordIfAbsent, queryAllPrefix, putRecord, putRecords, queryPage, queryPrefix, updateRecord, getRecord, deleteRecord, resetMockRecords, commit, isConflict };

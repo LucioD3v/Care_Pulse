@@ -17,6 +17,8 @@ provider:
     CARE_TABLE_NAME:
       Ref: CarePulseTable
     STAGE: ${sls:stage}
+    CARE_MODE: ${param:careMode, env:CARE_MODE, 'demo'}
+    WELLNESS_RETENTION_DAYS: ${param:wellnessRetentionDays, env:WELLNESS_RETENTION_DAYS, '90'}
     DEFAULT_MEMBER_NAME: ${param:defaultMemberName, env:DEFAULT_MEMBER_NAME, 'Elena'}
     DEFAULT_CAREGIVER_NAME: ${param:defaultCaregiverName, env:DEFAULT_CAREGIVER_NAME, 'Laura'}
     DEFAULT_BASELINE_SLEEP_HOURS: ${param:baselineSleepHours, env:DEFAULT_BASELINE_SLEEP_HOURS, ''}

@@ -48,6 +48,11 @@ test('ASK CloudFormation YAML retains scoped logs, model access and encrypted no
     assert.ok(config.Resources.AlexaSkillFunction.Properties.Environment.Variables.ALEXA_SKILL_ID);
     assert.ok(config.Resources.AlexaSkillLogPolicy);
     assert.ok(config.Resources.NotificationKey);
+    assert.equal(config.Resources.AlexaSkillFunction.Properties.Environment.Variables.CARE_TABLE_NAME.Ref, 'CarePulseTable');
+    assert.equal(config.Resources.CarePulseTable.DeletionPolicy, 'Retain');
+    assert.deepEqual(config.Resources.CarePulseTable.Properties.KeySchema.map(key => key.AttributeName), ['pk', 'sk']);
+    assert.equal(config.Resources.CarePulseTable.Properties.GlobalSecondaryIndexes[0].IndexName, 'PendingFollowups');
+    assert.ok(config.Resources.HealthMetricsTable, 'The legacy table must remain in the stack.');
     assert.match(template, /BedrockResourceArns/);
     assert.doesNotMatch(template, /logs:\*/);
 });

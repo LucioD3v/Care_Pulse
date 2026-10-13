@@ -2,6 +2,11 @@ AWSTemplateFormatVersion: 2010-09-09
 Parameters:
   SkillId:
     Type: String
+  CareMode:
+    Type: String
+    Default: demo
+    AllowedValues: [demo, production]
+    Description: Use demo only with synthetic hackathon data.
   LambdaRuntime:
     Type: String
     Default: nodejs22.x
@@ -49,6 +54,14 @@ Resources:
                 Action:
                   - dynamodb:PutItem
                   - dynamodb:Query
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                Resource:
+                  - !GetAtt CarePulseTable.Arn
+                  - !Sub '${CarePulseTable.Arn}/index/*'
+              - Effect: Allow
+                Action: [dynamodb:PutItem, dynamodb:Query]
                 Resource: !GetAtt HealthMetricsTable.Arn
               - Effect: Allow
                 Action:
@@ -83,8 +96,33 @@ Resources:
           ALEXA_SKILL_ID: !Ref SkillId
           VOICE_TIMEOUT_MS: '1200'
           HEALTH_TABLE_NAME: !Ref HealthMetricsTable
+          CARE_TABLE_NAME: !Ref CarePulseTable
+          CARE_MODE: !Ref CareMode
           SNS_TOPIC_ARN: !Ref CaregiverAlertsTopic
           BEDROCK_MODEL_ID: !Ref BedrockModelId
+  CarePulseTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: pk, AttributeType: S }
+        - { AttributeName: sk, AttributeType: S }
+        - { AttributeName: pendingPartition, AttributeType: S }
+        - { AttributeName: dueAt, AttributeType: S }
+      KeySchema:
+        - { AttributeName: pk, KeyType: HASH }
+        - { AttributeName: sk, KeyType: RANGE }
+      GlobalSecondaryIndexes:
+        - IndexName: PendingFollowups
+          KeySchema:
+            - { AttributeName: pendingPartition, KeyType: HASH }
+            - { AttributeName: dueAt, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+      TimeToLiveSpecification: { AttributeName: expiresAt, Enabled: true }
+      SSESpecification: { SSEEnabled: true }
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
   HealthMetricsTable:
     Type: AWS::DynamoDB::Table
     Properties:

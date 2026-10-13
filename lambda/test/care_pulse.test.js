@@ -87,7 +87,11 @@ test('MCP surface matches the CarePulse strategy', () => {
         'create_followup',
         'request_consent',
         'send_caregiver_alert',
-        'ingest_bee_context'
+        'ingest_bee_context',
+        'list_followups',
+        'complete_followup',
+        'cancel_followup',
+        'revoke_consent'
     ]);
 });
 
@@ -176,7 +180,7 @@ test('happy path records wellness, schedules follow-up, stores consent, and prep
             intensity: slot('intensity', 'more than usual')
         }
     }));
-    assert.match(report.response.outputSpeech.ssml, /check in again at 6 PM/i);
+    assert.match(report.response.outputSpeech.ssml, /check-in (today|tomorrow) at 6 PM/i);
 
     const schedule = await invokeAlexa(alexaRequest({
         userId,
@@ -267,7 +271,7 @@ test('preferences change summary detail, default time, and follow-up offers', as
         intentName: 'ReportWellnessIntent',
         slots: { wellnessSignal: slot('wellnessSignal', 'tiredness') }
     }));
-    assert.match(offeredReport.response.outputSpeech.ssml, /check in again at 8 PM/i);
+    assert.match(offeredReport.response.outputSpeech.ssml, /check-in (today|tomorrow) at 8 PM/i);
     await invokeAlexa(alexaRequest({
         userId,
         intentName: 'AMAZON.YesIntent',
@@ -322,13 +326,14 @@ test('member and report text cannot inject spoken SSML or APL markup', async () 
         supportedInterfaces: { 'Alexa.Presentation.APL': {} }
     });
     const ownerId = require('../index')._private.ownerId({ requestEnvelope: request });
-    await mcp.logWellnessEvent({ ownerId, memberName: 'E <break/>', signal: 'bad<blink>', state: 'reported' });
+    await assert.rejects(mcp.logWellnessEvent({ ownerId, memberName: 'E <break/>', signal: 'bad<blink>', state: 'reported' }), TypeError);
+    await mcp.logWellnessEvent({ ownerId, memberName: 'E <break/>', signal: 'sleep', state: 'reported' });
     const result = await invokeAlexa(request);
     assert.match(result.response.outputSpeech.ssml, /E &lt;break\/&gt;/);
     assert.doesNotMatch(result.response.outputSpeech.ssml, /<break\/>/);
     const dashboard = result.response.directives.find(item => item.type === 'Alexa.Presentation.APL.RenderDocument');
     const data = dashboard.datasources.wellnessData;
     assert.equal(data.memberName, 'E &lt;break/&gt;');
-    assert.match(data.summaryLine, /bad&lt;blink&gt;/);
+    assert.match(data.summaryLine, /sleep/i);
     assert.doesNotMatch(JSON.stringify(data), /<blink>|<break/);
 });

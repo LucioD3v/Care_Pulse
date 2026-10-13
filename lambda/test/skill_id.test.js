@@ -17,6 +17,6 @@ test('a different Skill ID cannot reach the business handlers', async () => {
     }, {}).catch(() => null);
     const owner = createHash('sha256').update('test-user').digest('hex').slice(0, 32);
     assert.equal((await queryPrefix('USER#' + owner, '')).length, 0);
-    if (result) assert.doesNotMatch(result.response.outputSpeech.ssml, /Welcome to CarePulse/);
+    if (result) assert.doesNotMatch(result.response.outputSpeech.ssml || result.response.outputSpeech.text, /Welcome to CarePulse/);
     mock.restoreAll();
 });

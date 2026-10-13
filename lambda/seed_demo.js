@@ -2,6 +2,9 @@
 
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
 const { DynamoDBDocumentClient, PutCommand } = require('@aws-sdk/lib-dynamodb');
+const { isDemo, retentionSeconds } = require('./runtime_config');
+
+if (!isDemo()) throw new Error('Set CARE_MODE=demo before seeding synthetic records.');
 
 const tableName = process.env.CARE_TABLE_NAME;
 const ownerId = process.env.DEMO_OWNER_ID || 'hackathon-demo';
@@ -53,7 +56,8 @@ async function main() {
         entityType: 'WELLNESS_EVENT',
         memberName,
         ...event,
-        provenance: 'demo-seed'
+        provenance: 'demo-seed',
+        expiresAt: Math.floor(Date.now() / 1000) + retentionSeconds()
     })));
     console.log(`Seeded CarePulse demo context for ${memberName} in ${tableName} using owner ${ownerId}.`);
 }

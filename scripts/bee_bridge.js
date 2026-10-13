@@ -140,7 +140,9 @@ function buildExports({ facts, conversations, wearerSpeakers, sinceMs }) {
         if (!inWindow(exportedAt)) { stats.outsideWindow++; continue; }
         if (fact.confirmed !== true) { stats.unconfirmedFacts++; continue; }
         stats.confirmedFacts++;
-        exports.push({ kind: 'fact', beeExport: { exportedAt, facts: [{ text: fact.text, confirmed: true }] } });
+        exports.push({ kind: 'fact', beeExport: { exportedAt,
+            ...(fact.id !== undefined ? { sourceId: 'fact:' + fact.id } : {}),
+            facts: [{ text: fact.text, confirmed: true }] } });
     }
 
     for (const conversation of conversations) {
@@ -159,7 +161,9 @@ function buildExports({ facts, conversations, wearerSpeakers, sinceMs }) {
         }
         if (!utterances.length) continue;
         stats.conversationsUsed++;
-        exports.push({ kind: 'conversation', beeExport: { exportedAt, conversations: [{ utterances }] } });
+        exports.push({ kind: 'conversation', beeExport: { exportedAt,
+            ...(conversation.summary?.id !== undefined ? { sourceId: 'conversation:' + conversation.summary.id } : {}),
+            conversations: [{ utterances }] } });
     }
     return { exports, stats };
 }

@@ -86,13 +86,14 @@ test('sharing permission rejects missing, expired, revoked, or mismatched consen
         await grantBeeConsent(input);
         const followup = await care.createFollowup({ ...input, signal: 'tiredness', dueDate: '2030-01-10', dueTime: '18:00' });
         if (scenario !== 'missing') {
-            const consent = await care.requestConsent({
-                ...input, caregiverName: scenario === 'other-caregiver' ? 'Someone else' : 'Laura',
-                signal: scenario === 'other-signal' ? 'sleep' : 'tiredness',
-                followupId: scenario === 'other-followup' ? 'another-followup' : followup.followupId,
-                ...(scenario === 'expired' ? { expiresAt: Math.floor(Date.now() / 1000) - 1 } : {})
-            });
-            if (scenario === 'revoked') await repository.updateRecord(consent.pk, consent.sk, { status: 'revoked' });
+            const consent = await care.requestConsent({ ...input, caregiverName: 'Laura',
+                signal: 'tiredness', followupId: followup.followupId });
+            const changes = {
+                expired: { expiresAt: 1 }, revoked: { status: 'revoked' },
+                'other-signal': { signal: 'sleep' }, 'other-followup': { followupId: 'another-followup' },
+                'other-caregiver': { caregiverName: 'Someone else' }
+            };
+            await repository.updateRecord(consent.pk, consent.sk, changes[scenario]);
         }
         const { data } = await summary(event);
         assert.equal(data.dashboard.permission, 'No active permission for Laura on the next follow-up', scenario);
@@ -116,22 +117,24 @@ test('the latest report remains visible when the selected period has no reports'
     assert.match(voiceOnly.response.outputSpeech.ssml, /summary/);
 });
 
-test('dashboard reuses loaded context, history and follow-up and reads only the exact consent', async () => {
+test('dashboard reuses history and context but revalidates the consent binding', async () => {
     const input = { ownerId: 'reuse', memberName: 'Elena' };
     const context = await care.getCareContext(input);
     const followup = await care.createFollowup({ ...input, signal: 'sleep', dueDate: '2030-01-10', dueTime: '18:00' });
     const consent = await care.requestConsent({ ...input, caregiverName: context.caregiverName,
         signal: followup.signal, followupId: followup.followupId });
+    const bound = await care.getFollowupById({ ...input, followupId: followup.followupId });
     const commands = [];
     process.env.CARE_TABLE_NAME = 'test';
     mock.method(DynamoDBDocumentClient.prototype, 'send', async command => {
         commands.push(command);
-        return { Item: consent };
+        const sk = command.input.Key.sk;
+        return { Item: sk === consent.sk ? consent : sk === bound.sk ? bound : { memberName: 'Elena', followupSk: bound.sk } };
     });
     const data = await care.getCareDashboard({ ...input, context, followup,
         history: [{ signal: 'sleep', recordedAt: new Date().toISOString() }] });
     assert.equal(data.permission, 'Active for Laura on this follow-up');
-    assert.equal(commands.length, 1);
+    assert.equal(commands.length, 3);
     assert.equal(commands[0].constructor.name, 'GetCommand');
     assert.equal(commands[0].input.Key.sk, consent.sk);
 });

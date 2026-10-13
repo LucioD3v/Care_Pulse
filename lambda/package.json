@@ -4,7 +4,7 @@
     "description": "Consent-gated family wellness follow-ups for Alexa",
     "main": "index.js",
     "scripts": {
-        "test": "node --test \"test/**/*.test.js\"",
+        "test": "node --require ./test/setup.js --test \"test/**/*.test.js\"",
         "seed:demo": "node seed_demo.js"
     },
     "author": "CarePulse team",
@@ -21,7 +21,8 @@
         "ajv": "8.20.0",
         "ajv-formats": "3.0.1",
         "ask-sdk-core": "^2.14.0",
-        "ask-sdk-model": "^1.79.0"
+        "ask-sdk-model": "^1.79.0",
+        "jose": "6.2.12"
     },
     "devDependencies": {
         "yaml": "2.9.1"

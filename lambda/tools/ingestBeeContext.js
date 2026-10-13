@@ -5,8 +5,9 @@ const { getCareContext } = require('../care_service');
 const { resolveBeeLink } = require('../bee_link');
 const { sleepIntensity, verifiedSleepBaseline } = require('../care_baseline');
 const { metric } = require('../observability');
+const { createHash } = require('node:crypto');
 
-const EVENT_TTL_SECONDS = 90 * 24 * 60 * 60;
+const { retentionSeconds } = require('../runtime_config');
 
 const SIGNAL_PATTERNS = [
     { pattern: /\b(tired|exhausted|drained)\b/i, signal: 'tiredness' },
@@ -20,20 +21,28 @@ const SIGNAL_PATTERNS = [
 const HIGH_INTENSITY = /\b(extremely|completely|totally)\b/i;
 const MODERATE_INTENSITY = /\b(very|really|quite)\b/i;
 
-function detectIntensity(text) {
-    if (HIGH_INTENSITY.test(text)) return 'high';
-    if (MODERATE_INTENSITY.test(text)) return 'moderate';
-    return 'low';
+function detectIntensity(text, pattern) {
+    const match = pattern.exec(text);
+    const preceding = match ? text.slice(0, match.index).trimEnd() : '';
+    if (HIGH_INTENSITY.test(preceding.split(/\s+/).at(-1) || '')) return 'high';
+    if (MODERATE_INTENSITY.test(preceding.split(/\s+/).at(-1) || '')) return 'moderate';
+    return 'reported';
 }
 
-function extractSignalsFromText(texts) {
+function extractSignalsFromText(texts, memberName = '') {
     const seen = new Set();
     const results = [];
     for (const text of texts) {
-        for (const { pattern, signal } of SIGNAL_PATTERNS) {
-            if (!seen.has(signal) && pattern.test(text)) {
+        for (const clause of text.split(/[.!?;,]|\bbut\b/i)) {
+            const trimmed = clause.trim();
+            if (!trimmed) continue;
+            const otherPerson = /\b(my|our|his|her|their)\s+(mother|father|mom|dad|brother|sister|friend|partner|child|daughter|son)\b|\b(he|she|they|someone else)\b/i;
+            if (otherPerson.test(trimmed) && !(memberName && trimmed.toLowerCase().includes(memberName.toLowerCase()))) continue;
+            for (const { pattern, signal } of SIGNAL_PATTERNS) {
+                if (seen.has(signal) || !pattern.test(trimmed)) continue;
+                if (signal !== 'appetite' && /\b(?:not|never|no longer|without)\s+(?:(?:feeling|being|very|really|any)\s+){0,2}(?:tired|exhausted|drained|sad|anxious|stressed|dizzy|in pain|pain|aching|aches|insomnia)\b/i.test(trimmed)) continue;
                 seen.add(signal);
-                results.push({ signal, intensity: detectIntensity(text), source: 'bee' });
+                results.push({ signal, intensity: detectIntensity(trimmed, pattern), source: 'bee' });
             }
         }
     }
@@ -52,7 +61,7 @@ function validateExport(beeExport) {
     if (!beeExport || typeof beeExport !== 'object') {
         throw new TypeError('beeExport is required.');
     }
-    // exportedAt keys every event, which is what makes re-ingesting the same export idempotent.
+    // Source identity and timestamp distinguish exports; replaying the same export is idempotent.
     if (typeof beeExport.exportedAt !== 'string' || Number.isNaN(Date.parse(beeExport.exportedAt))) {
         throw new TypeError('beeExport.exportedAt must be an ISO 8601 date-time.');
     }
@@ -93,17 +102,20 @@ function selectWearerTexts(beeExport) {
 }
 
 async function ingestBeeContext({ linkCode, beeExport } = {}) {
-    const { ownerId, memberName, consentId } = await resolveBeeLink(linkCode);
+    const { ownerId, memberName, consentId, consentCheck } = await resolveBeeLink(linkCode);
     validateExport(beeExport);
     require('../mcp_contracts').validateToolInput('ingest_bee_context', { linkCode, beeExport });
     const startedAt = Date.now();
     const pk = partitionKey(ownerId);
     const recordedAt = new Date(beeExport.exportedAt).toISOString();
-    const expiresAt = Math.floor(Date.now() / 1000) + EVENT_TTL_SECONDS;
-    const eventPrefix = `EVENT#${memberKey(memberName)}#${recordedAt}`;
+    const expiresAt = Math.floor(Date.now() / 1000) + retentionSeconds();
+    const sourceKey = beeExport.sourceId
+        ? createHash('sha256').update(beeExport.sourceId).digest('hex')
+        : createHash('sha256').update(JSON.stringify(beeExport)).digest('hex');
+    const eventPrefix = `EVENT#${memberKey(memberName)}#${recordedAt}#${sourceKey}`;
     const { texts, ignored } = selectWearerTexts(beeExport);
 
-    const events = extractSignalsFromText(texts).map(({ signal, intensity }) => ({
+    const events = extractSignalsFromText(texts, memberName).map(({ signal, intensity }) => ({
         sk: `${eventPrefix}#bee-text-${signal}`,
         signal,
         state: intensity,
@@ -139,7 +151,7 @@ async function ingestBeeContext({ linkCode, beeExport } = {}) {
                 source: 'bee',
                 beeConsentId: consentId,
                 expiresAt
-            });
+            }, { checks: [consentCheck] });
             written ? eventsIngested++ : skipped++;
         } catch {
             errors.push({ signal: event.signal, message: 'The event could not be saved. Its write status is unconfirmed.' });
