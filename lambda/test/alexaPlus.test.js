@@ -18,6 +18,7 @@ beforeEach(() => {
         'MCP_JWT_CLIENT_IDS', 'MCP_JWKS_URI', 'MCP_OAUTH_SCOPES']) delete process.env[name];
     process.env.COGNITO_DOMAIN_URL = COGNITO;
     process.env.DEMO_OWNER_ID = 'alexa-plus-demo-owner';
+    process.env.DEMO_TOKEN_SUBJECT = 'alexa-user';
     resetMockRecords();
 });
 
@@ -173,6 +174,20 @@ test('a verified Bearer token opens the MCP without the shared key and cannot pi
     assert.equal((await call({ memberName: 'Elena', ownerId: 'someone-else' })).isError, true);
 });
 
+test('in demo mode only the configured Cognito subject can use a token; other accounts are refused', async t => {
+    process.env.MCP_API_KEY = 'shared-demo-key';
+    let subject = 'alexa-user';
+    t.mock.method(identity, 'verifyToken', async () => ({ sub: subject, iss: 'https://issuer.example' }));
+    const init = () => rpc({ id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'a', version: '1' } } },
+        { authorization: 'Bearer valid-token' });
+    assert.equal((await init()).statusCode, 200);
+    subject = 'second-cognito-user';
+    assert.equal((await init()).statusCode, 401);
+    subject = 'alexa-user';
+    delete process.env.DEMO_TOKEN_SUBJECT;
+    assert.equal((await init()).statusCode, 401, 'token access is closed when no subject is configured');
+});
+
 test('missing or invalid tokens get a plain 401 so Alexa+ starts account linking', async t => {
     process.env.MCP_API_KEY = 'shared-demo-key';
     t.mock.method(identity, 'verifyToken', async () => { throw new Error('expired'); });
@@ -203,6 +218,7 @@ test('Serverless defines a Cognito authorization-code client with PKCE routes fo
     const env = config.functions.mcpGateway.environment;
     assert.deepEqual(env.MCP_JWT_CLIENT_IDS, { Ref: 'McpAlexaClient' });
     assert.equal(env.MCP_OAUTH_SCOPES, 'carepulse/access');
+    assert.match(String(env.DEMO_TOKEN_SUBJECT), /demoTokenSubject.*''}$/);
 });
 
 // --- Consent cannot be created by a model over OAuth ---

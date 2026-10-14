@@ -44,9 +44,11 @@ async function fromMcp(event) {
     const header = Object.entries(event.headers || {}).find(([key]) => key.toLowerCase() === 'authorization')?.[1];
     if (isDemo()) {
         if (header === undefined) return { ownerId: process.env.DEMO_OWNER_ID || null, channel: 'mcp', demo: true };
-        // Alexa+ authenticates with OAuth; in demo mode a verified token acts for the demo owner.
-        await verifiedClaims(header);
-        if (!process.env.DEMO_OWNER_ID) throw new AccessError();
+        // Alexa+ authenticates with OAuth. In demo mode only the single configured Cognito subject may
+        // act for the demo owner, so a second account can never reach the same wellness records.
+        const claims = await verifiedClaims(header);
+        const subject = process.env.DEMO_TOKEN_SUBJECT;
+        if (!process.env.DEMO_OWNER_ID || !subject || claims.sub !== subject) throw new AccessError();
         return { ownerId: process.env.DEMO_OWNER_ID, channel: 'mcp', demo: true, viaToken: true };
     }
     const claims = await verifiedClaims(header);

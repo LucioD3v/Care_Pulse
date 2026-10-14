@@ -76,6 +76,8 @@ functions:
       MCP_OAUTH_SCOPES: carepulse/access
       MCP_RESOURCE_URL: ${param:mcpResourceUrl, env:MCP_RESOURCE_URL, ''}
       OAUTH_ISSUER_URL: ${param:oauthIssuerUrl, env:OAUTH_ISSUER_URL, ''}
+      # Demo mode: the only Cognito "sub" allowed to act for DEMO_OWNER_ID. Empty disables token access.
+      DEMO_TOKEN_SUBJECT: ${param:demoTokenSubject, env:DEMO_TOKEN_SUBJECT, ''}
     package:
       patterns:
         - lambda/**
