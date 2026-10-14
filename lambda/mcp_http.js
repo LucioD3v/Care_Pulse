@@ -102,7 +102,10 @@ async function handle(event) {
     if (!session.initialized) return response(400, rpcError(request.id, -32000, 'Session initialization is incomplete.'), headers);
     if (request.method === 'tools/list') {
         // Only the shared-key demo client may name an owner; token callers act as themselves.
-        const catalog = isDemo() && !currentPrincipal()?.viaToken ? MCP_TOOLS : MCP_TOOLS.map(tool => {
+        // Token callers never see request_consent: consent requires the person's spoken "yes" in the skill.
+        const viaToken = Boolean(currentPrincipal()?.viaToken);
+        const visible = viaToken ? MCP_TOOLS.filter(tool => tool.name !== 'request_consent') : MCP_TOOLS;
+        const catalog = isDemo() && !viaToken ? MCP_TOOLS : visible.map(tool => {
             const schema = structuredClone(tool.inputSchema);
             delete schema.properties.ownerId;
             schema.required = schema.required.filter(name => name !== 'ownerId');

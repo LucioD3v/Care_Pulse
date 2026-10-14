@@ -411,8 +411,10 @@ async function resolveCaregiver({ ownerId, memberName, caregiverName }) {
 async function requestConsent({ ownerId, memberName, caregiverName, signal, followupId,
     expiresAt = Math.floor(Date.now() / 1000) + 36 * 60 * 60 }) {
     authorizeMember(ownerId, memberName, true);
-    // A model tool call cannot stand in for a person's affirmative confirmation.
-    if (!isDemo() && currentPrincipal()?.channel !== 'alexa') throw new AccessError();
+    // A model tool call cannot stand in for a person's affirmative confirmation. This also covers
+    // Alexa+ OAuth callers in demo mode, which are driven by a model rather than the skill's YesIntent.
+    const principal = currentPrincipal();
+    if ((!isDemo() || principal?.viaToken) && principal?.channel !== 'alexa') throw new AccessError();
     const followup = await getFollowupById({ ownerId, memberName, followupId });
     const now = Math.floor(Date.now() / 1000);
     if (!followup || followup.status !== 'pending' || followup.signal !== normalized(signal)) {

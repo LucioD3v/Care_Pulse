@@ -61,7 +61,7 @@ test('protected resource metadata points Alexa+ to the CarePulse authorization s
 
 test('authorization server metadata advertises S256 PKCE, which Cognito discovery omits', async () => {
     process.env.MCP_JWT_ISSUER = 'https://cognito-idp.us-east-1.amazonaws.com/us-east-1_pool';
-    for (const route of ['/.well-known/oauth-authorization-server', '/.well-known/openid-configuration']) {
+    for (const route of ['/.well-known/oauth-authorization-server']) {
         const metadata = JSON.parse((await get(route)).body);
         assert.equal(metadata.issuer, `https://${HOST}`);
         assert.equal(metadata.authorization_endpoint, `https://${HOST}/oauth/authorize`);
@@ -70,6 +70,8 @@ test('authorization server metadata advertises S256 PKCE, which Cognito discover
         assert.deepEqual(metadata.grant_types_supported, ['authorization_code', 'refresh_token']);
         assert.equal(metadata.jwks_uri, 'https://cognito-idp.us-east-1.amazonaws.com/us-east-1_pool/.well-known/jwks.json');
     }
+    // CarePulse is not an OpenID provider, so it publishes no OIDC discovery document.
+    assert.notEqual((await get('/.well-known/openid-configuration')).statusCode, 200);
 });
 
 // --- Authorization facade ---
@@ -197,7 +199,33 @@ test('Serverless defines a Cognito authorization-code client with PKCE routes fo
     const routes = config.functions.mcpGateway.events.map(event => `${event.httpApi.method} ${event.httpApi.path}`);
     for (const route of ['GET /.well-known/oauth-protected-resource', 'GET /.well-known/oauth-authorization-server',
         'GET /oauth/authorize', 'POST /oauth/token']) assert.ok(routes.includes(route), route);
+    assert.equal(routes.includes('GET /.well-known/openid-configuration'), false);
     const env = config.functions.mcpGateway.environment;
     assert.deepEqual(env.MCP_JWT_CLIENT_IDS, { Ref: 'McpAlexaClient' });
     assert.equal(env.MCP_OAUTH_SCOPES, 'carepulse/access');
+});
+
+// --- Consent cannot be created by a model over OAuth ---
+
+test('Alexa+ OAuth callers cannot see or call request_consent; the shared-key client is unchanged', async t => {
+    process.env.MCP_API_KEY = 'shared-demo-key';
+    t.mock.method(identity, 'verifyToken', async () => ({ sub: 'alexa-user', iss: 'https://issuer.example' }));
+    const tokenSession = await openSession({ authorization: 'Bearer good-token' });
+    const tokenTools = JSON.parse((await rpc({ id: 2, method: 'tools/list', params: {} }, tokenSession)).body).result.tools.map(tool => tool.name);
+    assert.equal(tokenTools.includes('request_consent'), false);
+    assert.ok(tokenTools.includes('send_caregiver_alert'));
+
+    const care = require('../care_service');
+    const today = new Date().toISOString().slice(0, 10);
+    const followup = await care.createFollowup({ ownerId: 'alexa-plus-demo-owner', memberName: 'Elena', signal: 'tiredness', dueDate: today, dueTime: '18:00' });
+    const attempt = JSON.parse((await rpc({ id: 3, method: 'tools/call', params: { name: 'request_consent', arguments: {
+        memberName: 'Elena', caregiverName: 'Laura', signal: 'tiredness', followupId: followup.followupId
+    } } }, tokenSession)).body).result;
+    assert.equal(attempt.isError, true);
+    assert.equal(await care.findActiveConsent({ ownerId: 'alexa-plus-demo-owner', memberName: 'Elena', caregiverName: 'Laura',
+        signal: 'tiredness', followupId: followup.followupId }), null);
+
+    const keySession = await openSession({ 'x-carepulse-mcp-key': 'shared-demo-key' });
+    const keyTools = JSON.parse((await rpc({ id: 4, method: 'tools/list', params: {} }, keySession)).body).result.tools.map(tool => tool.name);
+    assert.ok(keyTools.includes('request_consent'));
 });

@@ -7,7 +7,9 @@
 // would turn into a token audience only with extra resource-binding setup.
 
 const PRM_PATHS = new Set(['/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/mcp']);
-const AS_PATHS = new Set(['/.well-known/oauth-authorization-server', '/.well-known/openid-configuration']);
+// RFC 8414 only. CarePulse is not an OpenID provider (it issues no id_token under its own issuer),
+// so it does not publish /.well-known/openid-configuration.
+const AS_PATHS = new Set(['/.well-known/oauth-authorization-server']);
 const MAX_TOKEN_BODY = 8192;
 
 function json(statusCode, body) {

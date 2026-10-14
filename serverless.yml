@@ -103,9 +103,6 @@ functions:
           path: /.well-known/oauth-authorization-server
           method: GET
       - httpApi:
-          path: /.well-known/openid-configuration
-          method: GET
-      - httpApi:
           path: /oauth/authorize
           method: GET
       - httpApi:
