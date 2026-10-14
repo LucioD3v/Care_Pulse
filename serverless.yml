@@ -64,6 +64,11 @@ functions:
     description: CarePulse MCP 2025-11-25 JSON Streamable HTTP gateway
     handler: lambda/mcp_http.handler
     role: { Fn::GetAtt: [McpRole, Arn] }
+    # Alexa+ requires MCP round trips under 500 ms. Lambda CPU scales with memory, and provisioned
+    # concurrency keeps initialized environments ready so cold starts stay off the request path.
+    # Provisioned concurrency is billed while enabled; set it to 1 for demos and judging, 0 otherwise.
+    memorySize: ${param:mcpMemorySize, env:MCP_MEMORY_SIZE, 1024}
+    provisionedConcurrency: ${param:mcpProvisionedConcurrency, env:MCP_PROVISIONED_CONCURRENCY, 0}
     environment:
       MCP_API_KEY: ${param:mcpApiKey, env:MCP_API_KEY, env:CAREPULSE_MCP_KEY}
       MCP_ALLOWED_ORIGINS: ${param:mcpAllowedOrigins, env:MCP_ALLOWED_ORIGINS, ''}
@@ -280,6 +285,25 @@ resources:
         Period: 60
         EvaluationPeriods: 1
         Threshold: 3000
+        ComparisonOperator: GreaterThanOrEqualToThreshold
+        TreatMissingData: notBreaching
+        AlarmActions:
+          Fn::If: [HasAlarmTopic, [{ Ref: OperationsAlarmTopicArn }], { Ref: 'AWS::NoValue' }]
+    McpLatencyAlarm:
+      Type: AWS::CloudWatch::Alarm
+      Properties:
+        AlarmDescription: MCP p95 handler time is near the Alexa+ 500 ms round-trip limit.
+        Namespace: CarePulse
+        MetricName: RequestDuration
+        Dimensions:
+          - Name: Service
+            Value: mcp
+          - Name: Stage
+            Value: ${sls:stage}
+        ExtendedStatistic: p95
+        Period: 300
+        EvaluationPeriods: 1
+        Threshold: 400
         ComparisonOperator: GreaterThanOrEqualToThreshold
         TreatMissingData: notBreaching
         AlarmActions:

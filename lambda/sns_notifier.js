@@ -1,10 +1,18 @@
 'use strict';
 
-const { SNSClient, PublishCommand, ListSubscriptionsByTopicCommand } = require('@aws-sdk/client-sns');
 const { metric, sendWithBudget } = require('./observability');
 const { isDemo } = require('./runtime_config');
 
-const snsClient = new SNSClient({ region: process.env.AWS_REGION || 'us-east-1', maxAttempts: 1 });
+// Loaded on first use: most MCP and Alexa requests never send a notification, and the SNS SDK
+// adds noticeable cold-start time.
+let sns;
+function snsSdk() {
+    if (!sns) {
+        const sdk = require('@aws-sdk/client-sns');
+        sns = { sdk, client: new sdk.SNSClient({ region: process.env.AWS_REGION || 'us-east-1', maxAttempts: 1 }) };
+    }
+    return sns;
+}
 
 function formatAlert({ memberName, caregiverName, signal, followupStatus, consentId }) {
     return {
@@ -36,7 +44,7 @@ async function sendCaregiverAlert(alert) {
             const destination = alert.destination;
             const allowed = (process.env.SNS_ALLOWED_TOPIC_ARNS || '').split(',');
             if (!allowed.includes(topicArn)) return { sent: false, simulated: false, status: 'unconfigured' };
-            const subscriptions = await sendWithBudget(snsClient, new ListSubscriptionsByTopicCommand({ TopicArn: topicArn }));
+            const subscriptions = await sendWithBudget(snsSdk().client, new (snsSdk().sdk.ListSubscriptionsByTopicCommand)({ TopicArn: topicArn }));
             const only = subscriptions.Subscriptions?.[0];
             if (subscriptions.NextToken || subscriptions.Subscriptions?.length !== 1
                 || only.SubscriptionArn !== destination.subscriptionArn || only.Endpoint !== destination.endpoint
@@ -44,7 +52,7 @@ async function sendCaregiverAlert(alert) {
                 return { sent: false, simulated: false, status: 'failed' };
             }
         }
-        const result = await sendWithBudget(snsClient, new PublishCommand({
+        const result = await sendWithBudget(snsSdk().client, new (snsSdk().sdk.PublishCommand)({
             TopicArn: topicArn,
             Subject: formatted.subject.slice(0, 100),
             Message: formatted.message,
