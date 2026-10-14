@@ -103,8 +103,10 @@ async function handle(event) {
     if (request.method === 'tools/list') {
         // Only the shared-key demo client may name an owner; token callers act as themselves.
         // Token callers never see request_consent: consent requires the person's spoken "yes" in the skill.
+        // Demo token callers also cannot send caregiver alerts (see sendCaregiverAlert).
         const viaToken = Boolean(currentPrincipal()?.viaToken);
-        const visible = viaToken ? MCP_TOOLS.filter(tool => tool.name !== 'request_consent') : MCP_TOOLS;
+        const hidden = new Set(viaToken ? ['request_consent', ...(isDemo() ? ['send_caregiver_alert'] : [])] : []);
+        const visible = MCP_TOOLS.filter(tool => !hidden.has(tool.name));
         const catalog = isDemo() && !viaToken ? MCP_TOOLS : visible.map(tool => {
             const schema = structuredClone(tool.inputSchema);
             delete schema.properties.ownerId;

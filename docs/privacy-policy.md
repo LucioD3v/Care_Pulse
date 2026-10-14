@@ -22,9 +22,9 @@ We do not sell your data, use it for advertising, or share it with anyone other 
 
 ## Retention
 
-- Wellness reports and Bee-derived signals: deleted automatically after 90 days.
-- Caregiver alert permission: expires after at most 36 hours and applies to one follow-up.
-- Bee permission: expires after 30 days.
+- Wellness reports and Bee-derived signals: set to expire after the retention period configured for the deployment (90 days by default, configurable from 1 to 365 days). After expiry they are no longer used, and the database removes them automatically, usually within a few days.
+- Caregiver alert permission: stops working after at most 36 hours and applies to one follow-up.
+- Bee permission: stops working after 30 days by default. Saying "unlink my Bee" removes Bee-derived signals right away.
 - Service logs: kept for 14 days and do not contain your reports.
 - Encrypted database backups (point-in-time recovery) may retain deleted data for up to 35 days.
 

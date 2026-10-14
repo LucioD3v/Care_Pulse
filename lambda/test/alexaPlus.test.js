@@ -207,13 +207,14 @@ test('Serverless defines a Cognito authorization-code client with PKCE routes fo
 
 // --- Consent cannot be created by a model over OAuth ---
 
-test('Alexa+ OAuth callers cannot see or call request_consent; the shared-key client is unchanged', async t => {
+test('Alexa+ OAuth callers cannot see or call consent or alert tools; the shared-key client is unchanged', async t => {
     process.env.MCP_API_KEY = 'shared-demo-key';
     t.mock.method(identity, 'verifyToken', async () => ({ sub: 'alexa-user', iss: 'https://issuer.example' }));
     const tokenSession = await openSession({ authorization: 'Bearer good-token' });
     const tokenTools = JSON.parse((await rpc({ id: 2, method: 'tools/list', params: {} }, tokenSession)).body).result.tools.map(tool => tool.name);
     assert.equal(tokenTools.includes('request_consent'), false);
-    assert.ok(tokenTools.includes('send_caregiver_alert'));
+    assert.equal(tokenTools.includes('send_caregiver_alert'), false);
+    assert.ok(tokenTools.includes('complete_followup'));
 
     const care = require('../care_service');
     const today = new Date().toISOString().slice(0, 10);
@@ -225,7 +226,64 @@ test('Alexa+ OAuth callers cannot see or call request_consent; the shared-key cl
     assert.equal(await care.findActiveConsent({ ownerId: 'alexa-plus-demo-owner', memberName: 'Elena', caregiverName: 'Laura',
         signal: 'tiredness', followupId: followup.followupId }), null);
 
+    const alert = JSON.parse((await rpc({ id: 5, method: 'tools/call', params: { name: 'send_caregiver_alert', arguments: {
+        memberName: 'Elena', caregiverName: 'Laura', signal: 'tiredness', followupStatus: 'same', consentId: 'any', authorized: true
+    } } }, tokenSession)).body).result;
+    assert.equal(alert.isError, true);
+
     const keySession = await openSession({ 'x-carepulse-mcp-key': 'shared-demo-key' });
     const keyTools = JSON.parse((await rpc({ id: 4, method: 'tools/list', params: {} }, keySession)).body).result.tools.map(tool => tool.name);
     assert.ok(keyTools.includes('request_consent'));
+    assert.ok(keyTools.includes('send_caregiver_alert'));
+});
+
+test('with voice consent in place, an Alexa+ token caller still cannot send the caregiver alert', async t => {
+    // The real risk: the person consented by voice, then the model completes the check-in and alerts.
+    process.env.MCP_API_KEY = 'shared-demo-key';
+    t.mock.method(identity, 'verifyToken', async () => ({ sub: 'alexa-user', iss: 'https://issuer.example' }));
+    const { handler: alexaHandler } = require('../index');
+    const access = require('../access_control');
+    const care = require('../care_service');
+    const voice = (intentName, extra = {}) => new Promise((resolve, reject) => alexaHandler({
+        version: '1.0',
+        session: { new: false, sessionId: 's', application: { applicationId: 'test' }, user: { userId: 'voice-user' }, attributes: extra.attributes || {} },
+        context: { System: { application: { applicationId: 'test' }, user: { userId: 'voice-user' }, device: { deviceId: 'd', supportedInterfaces: {} } } },
+        request: { type: 'IntentRequest', requestId: 'r-' + Date.now(), timestamp: new Date().toISOString(), locale: 'en-US',
+            intent: { name: intentName, confirmationStatus: 'NONE', slots: extra.slots || {} } }
+    }, {}, (error, result) => error ? reject(error) : resolve(result)));
+
+    const report = await voice('ReportWellnessIntent', { slots: { wellnessSignal: { name: 'wellnessSignal', value: 'tiredness' }, intensity: { name: 'intensity', value: 'more than usual' } } });
+    const schedule = await voice('AMAZON.YesIntent', { attributes: report.sessionAttributes });
+    await voice('AMAZON.YesIntent', { attributes: schedule.sessionAttributes });
+    const owner = { ownerId: 'alexa-plus-demo-owner', memberName: 'Elena' };
+    const followup = await care.getPendingFollowup(owner);
+    const consent = await care.findActiveConsent({ ...owner, caregiverName: 'Laura', signal: 'tiredness', followupId: followup.followupId });
+    assert.ok(consent, 'voice consent exists');
+
+    const session = await openSession({ authorization: 'Bearer good-token' });
+    const call = async (name, args) => JSON.parse((await rpc({ id: 9, method: 'tools/call', params: { name, arguments: args } }, session)).body).result;
+    assert.equal((await call('complete_followup', { memberName: 'Elena', followupId: followup.followupId, status: 'same' })).isError, false);
+    const alertInput = { memberName: 'Elena', caregiverName: 'Laura', signal: 'tiredness', followupStatus: 'same', consentId: consent.consentId };
+    assert.equal((await call('send_caregiver_alert', alertInput)).isError, true);
+
+    // Everything else was in order: the same alert succeeds for the shared-key demo client.
+    const sent = await access.withPrincipal({ ownerId: owner.ownerId, channel: 'mcp', demo: true },
+        () => care.sendCaregiverAlert({ ...alertInput, ownerId: owner.ownerId }));
+    assert.equal(sent.simulated, true);
+});
+
+test('production MCP principals keep the token marker so consent stays hidden there too', async t => {
+    const { DynamoDBDocumentClient } = require('@aws-sdk/lib-dynamodb');
+    const access = require('../access_control');
+    process.env.CARE_MODE = 'production';
+    process.env.CARE_TABLE_NAME = 'test';
+    t.after(() => { process.env.CARE_MODE = 'demo'; delete process.env.CARE_TABLE_NAME; });
+    t.mock.method(identity, 'verifyToken', async () => ({ iss: 'https://issuer.example', sub: 'user' }));
+    t.mock.method(DynamoDBDocumentClient.prototype, 'send', async command => ({ Item:
+        command.input.Key.sk === 'BINDING' ? { status: 'active', ownerId: 'a' }
+            : { status: 'active', members: [{ memberId: 'm', name: 'Elena', status: 'active', storageConsentGranted: true, role: 'owner' }] }
+    }));
+    const principal = await access.fromMcp({ headers: { Authorization: 'Bearer token' } });
+    assert.equal(principal.ownerId, 'a');
+    assert.equal(principal.viaToken, true);
 });

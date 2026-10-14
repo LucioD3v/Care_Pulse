@@ -487,6 +487,9 @@ async function evaluateAlertPolicy({ ownerId, memberName, caregiverName, signal,
 
 async function sendCaregiverAlert(input) {
     if (!input.ownerId || !input.consentId) throw new Error('A caregiver alert requires an allowed policy decision and active consent.');
+    // Demo alerts go to the shared demo topic without destination verification, so a model-driven
+    // Alexa+ caller must not trigger them; the voice skill still sends the alert after the check-in.
+    if (isDemo() && currentPrincipal()?.viaToken) throw new AccessError();
     authorizeMember(input.ownerId, input.memberName, true);
     const pk = partitionKey(input.ownerId);
     const records = await queryPrefix(pk, 'CONSENT#' + normalized(input.memberName) + '#' + normalized(input.caregiverName) + '#');

@@ -14,7 +14,7 @@ Alexa+ ──POST /mcp, Authorization: Bearer <token>──► CarePulse verifie
 
 CarePulse serves its own authorization-server metadata because Cognito's discovery document omits `code_challenge_methods_supported`, and Alexa+ blocks deployment without `S256` there. The `/oauth/*` endpoints forward to Cognito and drop the RFC 8707 `resource` parameter, which Cognito would otherwise turn into a token audience. Cognito still performs sign-in, PKCE verification, and token issuance. CarePulse accepts the resulting access tokens by issuer, `client_id`, `token_use: access`, and the `carepulse/access` scope.
 
-In demo mode (`CARE_MODE=demo`), a verified token acts for `DEMO_OWNER_ID`. Tools then hide `ownerId`, and a call naming another owner is rejected. Caregiver-sharing consent can only be granted by the person's spoken "yes" in the CarePulse skill: token callers do not see `request_consent`, and calling it is rejected, as in production. `send_caregiver_alert` still requires that voice-granted consent. Production mode keeps the existing identity binding (`IDENTITY#…` records) and requires a provisioned profile.
+In demo mode (`CARE_MODE=demo`), a verified token acts for `DEMO_OWNER_ID`. Tools then hide `ownerId`, and a call naming another owner is rejected. Caregiver-sharing consent can only be granted by the person's spoken "yes" in the CarePulse skill: token callers do not see `request_consent`, and calling it is rejected, as in production. In demo mode token callers also cannot call `send_caregiver_alert`, because demo alerts go to the shared demo topic without destination verification; the voice skill still sends the alert after the check-in. Production token callers can use `send_caregiver_alert`, which keeps its consent and verified-destination checks. Production mode keeps the existing identity binding (`IDENTITY#…` records) and requires a provisioned profile.
 
 ## Steps
 
@@ -22,8 +22,9 @@ In demo mode (`CARE_MODE=demo`), a verified token acts for `DEMO_OWNER_ID`. Tool
 2. **Check discovery:** open `McpProtectedResourceMetadataUrl` in a browser. `resource` must equal `McpEndpoint` exactly. If you use a custom domain, set the `mcpResourceUrl` and `oauthIssuerUrl` parameters.
 3. **Create the demo sign-in user** (self sign-up is disabled):
    ```
-   aws cognito-idp admin-create-user --user-pool-id <McpUserPoolId> --username <email> --user-attributes Name=email,Value=<email> Name=email_verified,Value=true
+   aws cognito-idp admin-create-user --user-pool-id <McpUserPoolId> --username <email> --user-attributes Name=email,Value=<email> Name=email_verified,Value=true --desired-delivery-mediums EMAIL
    ```
+   Cognito emails a temporary password, and the first sign-in asks for a new one.
 4. **Read the client secret** in the Cognito console (App clients → `carepulse-<stage>-alexa-plus`). Never paste it into a command line.
 5. **Create the add-on** (requires a US Alexa developer account):
    ```

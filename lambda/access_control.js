@@ -52,7 +52,7 @@ async function fromMcp(event) {
     const claims = await verifiedClaims(header);
     const binding = await getRecord('IDENTITY#' + digest(claims.iss + '|' + claims.sub), 'BINDING');
     if (!binding || binding.status !== 'active') throw new AccessError();
-    return principalForOwner(binding.ownerId, event.requestContext?.requestId, 'mcp');
+    return { ...await principalForOwner(binding.ownerId, event.requestContext?.requestId, 'mcp'), viaToken: true };
 }
 
 function authorizeMember(ownerId, memberName, write = false) {
