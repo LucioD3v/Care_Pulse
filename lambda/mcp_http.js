@@ -9,6 +9,7 @@ const { metric, withRequest } = require('./observability');
 const { InvalidBeeLinkError } = require('./bee_link');
 const { fromMcp, withPrincipal, currentPrincipal, AccessError } = require('./access_control');
 const { isDemo } = require('./runtime_config');
+const { isOAuthRoute, handleOAuth } = require('./oauth_endpoints');
 const VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26'];
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
@@ -36,7 +37,8 @@ function validEnvelope(request) {
 }
 
 async function handle(event) {
-    if (isDemo() && !authorized(event)) return response(401, rpcError(null, -32001, 'Unauthorized MCP request.'));
+    // No WWW-Authenticate header: Alexa+ starts account linking on a plain 401.
+    if (isDemo() && !authorized(event) && !currentPrincipal()?.viaToken) return response(401, rpcError(null, -32001, 'Unauthorized MCP request.'));
     const origin = header(event, 'origin');
     const origins = (process.env.MCP_ALLOWED_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean);
     if (origin && !origins.includes(origin)) return response(403, rpcError(null, -32001, 'Origin is not allowed.'));
@@ -99,7 +101,8 @@ async function handle(event) {
     if (request.method === 'ping') return response(200, rpcResult(request.id, {}), headers);
     if (!session.initialized) return response(400, rpcError(request.id, -32000, 'Session initialization is incomplete.'), headers);
     if (request.method === 'tools/list') {
-        const catalog = isDemo() ? MCP_TOOLS : MCP_TOOLS.map(tool => {
+        // Only the shared-key demo client may name an owner; token callers act as themselves.
+        const catalog = isDemo() && !currentPrincipal()?.viaToken ? MCP_TOOLS : MCP_TOOLS.map(tool => {
             const schema = structuredClone(tool.inputSchema);
             delete schema.properties.ownerId;
             schema.required = schema.required.filter(name => name !== 'ownerId');
@@ -113,7 +116,7 @@ async function handle(event) {
         try {
             const args = request.params?.arguments;
             const principal = currentPrincipal();
-            if (!principal.demo && args?.ownerId && args.ownerId !== principal.ownerId) throw new AccessError();
+            if ((!principal.demo || principal.viaToken) && args?.ownerId && args.ownerId !== principal.ownerId) throw new AccessError();
             const input = name === 'ingest_bee_context' ? args
                 : { ...args, ...(principal.ownerId ? { ownerId: principal.ownerId } : {}) };
             const result = await withPrincipal({ ...principal, requestId: sessionId + ':' + request.id },
@@ -137,6 +140,14 @@ async function handle(event) {
 }
 
 exports.handler = (event, context) => withRequest('mcp', context, 12000, async () => {
+    if (isOAuthRoute(event)) {
+        try {
+            return await handleOAuth(event);
+        } catch {
+            metric('ServiceErrors');
+            return response(500, { error: 'server_error' });
+        }
+    }
     try {
         const principal = await fromMcp(event);
         const result = await withPrincipal(principal, () => handle(event));

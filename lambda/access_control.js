@@ -31,14 +31,25 @@ async function fromAlexa(event) {
     return principalForOwner(ownerId, event.request?.requestId, 'alexa');
 }
 
-async function fromMcp(event) {
-    if (isDemo()) return { ownerId: process.env.DEMO_OWNER_ID || null, channel: 'mcp', demo: true };
-    const header = Object.entries(event.headers || {}).find(([key]) => key.toLowerCase() === 'authorization')?.[1];
+async function verifiedClaims(header) {
     if (typeof header !== 'string' || !header.startsWith('Bearer ')) throw new AccessError();
     let claims;
     try { claims = await require('./identity_tokens').verifyToken(header.slice(7)); }
     catch { throw new AccessError(); }
     if (typeof claims.sub !== 'string' || !claims.sub) throw new AccessError();
+    return claims;
+}
+
+async function fromMcp(event) {
+    const header = Object.entries(event.headers || {}).find(([key]) => key.toLowerCase() === 'authorization')?.[1];
+    if (isDemo()) {
+        if (header === undefined) return { ownerId: process.env.DEMO_OWNER_ID || null, channel: 'mcp', demo: true };
+        // Alexa+ authenticates with OAuth; in demo mode a verified token acts for the demo owner.
+        await verifiedClaims(header);
+        if (!process.env.DEMO_OWNER_ID) throw new AccessError();
+        return { ownerId: process.env.DEMO_OWNER_ID, channel: 'mcp', demo: true, viaToken: true };
+    }
+    const claims = await verifiedClaims(header);
     const binding = await getRecord('IDENTITY#' + digest(claims.iss + '|' + claims.sub), 'BINDING');
     if (!binding || binding.status !== 'active') throw new AccessError();
     return principalForOwner(binding.ownerId, event.requestContext?.requestId, 'mcp');
