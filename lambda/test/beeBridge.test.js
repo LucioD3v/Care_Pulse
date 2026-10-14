@@ -218,3 +218,24 @@ test('bridge does not report success when ingestion returns a partial result', a
         beeUrl: servers.beeUrl, mcpUrl: servers.mcpUrl, linkCode: 'ABCD-2345', send: true
     }), quiet), /did not complete/);
 });
+
+test('exports keep Bee IDs and split conversations that exceed the contract limits', () => {
+    const now = Date.now();
+    const utterances = Array.from({ length: 1201 }, () => ({ speaker: '1', text: 'x'.repeat(12000) }));
+    const { exports } = bridge.buildExports({
+        facts: [{ id: 'f1', text: 'I am tired', confirmed: true, created_at: new Date(now).toISOString() }],
+        conversations: [{ summary: { id: 'c9', start_time: now }, detail: { utterances } }],
+        wearerSpeakers: ['1'],
+        sinceMs: now - DAY
+    });
+    assert.equal(exports[0].beeExport.sourceId, 'fact:f1');
+    const parts = exports.filter(item => item.kind === 'conversation');
+    assert.deepEqual(parts.map(item => item.beeExport.sourceId), ['conversation:c9:part1', 'conversation:c9:part2', 'conversation:c9:part3']);
+    assert.deepEqual(parts.map(item => item.beeExport.conversations[0].utterances.length), [500, 500, 201]);
+    assert.equal(parts[0].beeExport.conversations[0].utterances[0].text.length, 10000);
+    const single = bridge.buildExports({
+        facts: [], conversations: [{ summary: { id: 'c1', start_time: now }, detail: { utterances: [{ speaker: '1', text: 'hi' }] } }],
+        wearerSpeakers: ['1'], sinceMs: now - DAY
+    });
+    assert.equal(single.exports[0].beeExport.sourceId, 'conversation:c1');
+});

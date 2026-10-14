@@ -32,10 +32,12 @@ function createGetWellnessSummaryHandler({ getSlotValue, ownerId, defaultMemberN
                 ownerId: userOwnerId, memberName, timeframe, context, now, history, pending
             });
             const signalText = snapshot.signals.length ? snapshot.signals.join(', ') : 'no recent signals';
-            const speech = context.summaryLength === 'detailed'
+            const beeEventCount = context.discreetMode === 'on' ? 0 : history.filter(isBeeEvent).length;
+            const summary = context.summaryLength === 'detailed'
                 || Alexa.getIntentName(handlerInput.requestEnvelope) === 'GetWellnessDetailsIntent'
                 ? COPY.summaryDetailed(memberName, timeframe, snapshot, signalText)
                 : COPY.summaryShort(memberName, timeframe, snapshot);
+            const speech = beeEventCount ? `${summary} ${COPY.beeSourceNote(beeEventCount)}` : summary;
 
             const responseBuilder = speakText(handlerInput, speech)
                 .withSimpleCard(CARD_TITLES.summary, context.discreetMode === 'on' ? CARD_CONTENT.discreet
@@ -54,7 +56,7 @@ function createGetWellnessSummaryHandler({ getSlotValue, ownerId, defaultMemberN
                     followupScheduled: context.discreetMode !== 'on' && Boolean(pending),
                     followupTime: context.discreetMode !== 'on' && pending ? `${pending.dueDate} at ${spokenTime(pending.dueTime)}` : '',
                     caregiverAlerted: false,
-                    hasBeeData: context.discreetMode !== 'on' && history.some(isBeeEvent),
+                    hasBeeData: beeEventCount > 0,
                     signals: context.discreetMode === 'on' ? {} : signalsFromHistory(history)
                 });
             }

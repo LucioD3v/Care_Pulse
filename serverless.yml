@@ -194,7 +194,7 @@ resources:
                   Resource:
                     Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/carepulse-${sls:stage}-alexa-skill:*
                 - Effect: Allow
-                  Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:Query, dynamodb:UpdateItem, dynamodb:DeleteItem]
+                  Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:Query, dynamodb:UpdateItem, dynamodb:DeleteItem, dynamodb:ConditionCheckItem]
                   Resource:
                     - { Fn::GetAtt: [CarePulseTable, Arn] }
                 - Effect: Allow
@@ -231,7 +231,7 @@ resources:
                   Resource:
                     Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/carepulse-${sls:stage}-mcp-gateway:*
                 - Effect: Allow
-                  Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:Query, dynamodb:UpdateItem, dynamodb:DeleteItem]
+                  Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:Query, dynamodb:UpdateItem, dynamodb:DeleteItem, dynamodb:ConditionCheckItem]
                   Resource:
                     - { Fn::GetAtt: [CarePulseTable, Arn] }
                 - Effect: Allow

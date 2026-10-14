@@ -305,6 +305,7 @@ test('voice flow links Bee, shows Bee data on the card, then unlinks and deletes
     assert.equal(data.signals.sleep.source, 'Bee 🐝');
     assert.equal(data.signals.energy.source, 'Bee 🐝');
     assert.equal(data.signals.appetite.value, 'No data');
+    assert.match(screen.response.outputSpeech.ssml, /3 of them came from your Bee wearable/);
 
     const unlinkAsked = await invokeAlexa(alexaRequest({ userId, intentName: 'UnlinkBeeIntent' }));
     const unlinked = await invokeAlexa(alexaRequest({ userId, intentName: 'AMAZON.YesIntent', attributes: unlinkAsked.sessionAttributes }));
@@ -399,4 +400,52 @@ test('schema report errors do not expose malformed transcript contents', t => {
     assert.equal(result.status, 1);
     assert.match(result.stderr, /valid JSON/);
     assert.doesNotMatch(result.stdout + result.stderr, /secret|diagnosis|SyntaxError/);
+});
+
+// --- Detection quality on real-world phrasing (English and Spanish) ---
+
+function detected(text) {
+    return Object.fromEntries(extractSignalsFromText([text], 'Elena').map(item => [item.signal, item.intensity]));
+}
+
+test('negations in any common form are not reported as symptoms', () => {
+    assert.deepEqual(detected("I don't feel anxious anymore"), {});
+    assert.deepEqual(detected('I have no pain'), {});
+    assert.deepEqual(detected('I am really not that stressed'), {});
+    assert.deepEqual(detected('I never feel dizzy'), {});
+    assert.deepEqual(detected('No estoy cansada y no me siento triste'), {});
+    assert.deepEqual(detected('Ya no tengo dolor, sin mareos'), {});
+});
+
+test('phrases that describe a problem through a negation are still detected', () => {
+    assert.deepEqual(detected("I'm not hungry and I couldn't sleep"), { appetite: 'reported', sleep: 'reported' });
+    assert.deepEqual(detected('No tengo hambre y no pude dormir'), { appetite: 'reported', sleep: 'reported' });
+    assert.deepEqual(detected('I have a headache'), { discomfort: 'reported' });
+});
+
+test('Spanish signals are detected with or without accents and keep keyword intensity', () => {
+    assert.deepEqual(detected('Estoy muy cansada'), { tiredness: 'moderate' });
+    assert.deepEqual(detected('Estoy completamente agotado'), { tiredness: 'high' });
+    assert.deepEqual(detected('Dormí mal y me duele la cabeza'), { sleep: 'reported', discomfort: 'reported' });
+    assert.deepEqual(detected('Dormi mal'), { sleep: 'reported' });
+    assert.deepEqual(detected('No estoy triste, pero estoy muy cansada'), { tiredness: 'moderate' });
+});
+
+test('Spanish mentions of other people are not attributed to the wearer', () => {
+    assert.deepEqual(detected('Mi mamá está muy cansada'), {});
+    assert.deepEqual(detected('Mi hijo tiene dolor de cabeza'), {});
+    assert.deepEqual(detected('Ella está mareada'), {});
+    assert.deepEqual(detected('Mi mamá está cansada, pero yo estoy estresada'), { mood: 'reported' });
+});
+
+test('the summary does not announce Bee data in discreet mode', async () => {
+    const userId = 'bee-discreet-' + Date.now();
+    const asked = await invokeAlexa(alexaRequest({ userId, intentName: 'LinkBeeIntent' }));
+    const granted = await invokeAlexa(alexaRequest({ userId, intentName: 'AMAZON.YesIntent', attributes: asked.sessionAttributes }));
+    const linkCode = granted.response.card.content.match(/Link code: ([A-Z0-9]{4}-[A-Z0-9]{4})/)[1];
+    await ingestBeeContext({ linkCode, beeExport: BEE_EXPORT });
+    const ownerId = require('../index')._private.ownerId({ requestEnvelope: alexaRequest({ userId, intentName: 'GetWellnessSummaryIntent' }) });
+    await mcp.updateCarePreferences({ ownerId, memberName: 'Elena', discreetMode: 'on' });
+    const summary = await invokeAlexa(alexaRequest({ userId, intentName: 'GetWellnessSummaryIntent' }));
+    assert.doesNotMatch(summary.response.outputSpeech.ssml, /Bee wearable/);
 });

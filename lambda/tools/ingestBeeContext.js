@@ -9,44 +9,72 @@ const { createHash } = require('node:crypto');
 
 const { retentionSeconds } = require('../runtime_config');
 
+// English and Spanish, matched per clause on lowercase text without accents. Patterns marked
+// "negated" already describe the problem through a negation ("not hungry", "no pude dormir").
 const SIGNAL_PATTERNS = [
-    { pattern: /\b(tired|exhausted|drained)\b/i, signal: 'tiredness' },
-    { pattern: /\binsomnia\b|\bslept badly\b/i, signal: 'sleep' },
-    { pattern: /\b(sad|anxious|stressed)\b/i, signal: 'mood' },
-    { pattern: /\bnot hungry\b|\bno appetite\b/i, signal: 'appetite' },
-    { pattern: /\bdizzy\b/i, signal: 'dizziness' },
-    { pattern: /\b(pain|ache|aches|aching)\b/i, signal: 'discomfort' }
+    { signal: 'tiredness', pattern: /\b(tired|exhausted|drained|worn out|cansad[oa]s?|agotad[oa]s?|sin energia)\b/g },
+    { signal: 'sleep', pattern: /\b(insomnia|insomnio|slept badly|dormi mal)\b/g },
+    { signal: 'sleep', negated: true, pattern: /\b(couldn'?t sleep|could not sleep|didn'?t sleep well|no (?:pude|puedo) dormir|no dormi bien)\b/g },
+    { signal: 'mood', pattern: /\b(sad|anxious|stressed|depressed|triste|ansios[oa]s?|estresad[oa]s?|deprimid[oa]s?|angustiad[oa]s?)\b/g },
+    { signal: 'appetite', negated: true, pattern: /\b(not hungry|no appetite|lost my appetite|no tengo (?:hambre|apetito)|sin (?:hambre|apetito)|perdi el apetito)\b/g },
+    { signal: 'dizziness', pattern: /\b(dizzy|lightheaded|maread[oa]s?|mareos?)\b/g },
+    { signal: 'discomfort', pattern: /\b(pain|aches?|aching|headaches?|hurts|dolor(?:es)?|me duele)\b/g }
 ];
 
-const HIGH_INTENSITY = /\b(extremely|completely|totally)\b/i;
-const MODERATE_INTENSITY = /\b(very|really|quite)\b/i;
+const NEGATORS = new Set([
+    'not', 'never', 'no', 'without', 'cannot', 'dont', 'didnt', 'cant', 'isnt', 'wasnt', 'arent', 'havent',
+    'nunca', 'tampoco', 'ni', 'sin'
+]);
+const HIGH_INTENSITY = new Set(['extremely', 'completely', 'totally', 'incredibly', 'extremadamente', 'completamente', 'totalmente']);
+const MODERATE_INTENSITY = new Set(['very', 'really', 'quite', 'muy', 'bastante']);
+const NEGATION_WINDOW = 3;
+const OTHER_PERSON = new RegExp([
+    String.raw`\b(my|our|his|her|their)\s+(mother|father|mom|dad|brother|sister|friend|partner|child|daughter|son|husband|wife|grandma|grandpa|grandmother|grandfather|boss|neighbor)\b`,
+    String.raw`\b(he|she|they|someone else)\b`,
+    String.raw`\b(mi|mis|su|sus|nuestr[oa]s?)\s+(mama|papa|madre|padre|hermano|hermana|amigo|amiga|pareja|hijo|hija|esposo|esposa|abuela|abuelo|jefe|jefa|vecino|vecina|novio|novia|nieto|nieta)\b`,
+    String.raw`\b(el|ella|ellos|ellas)\s+(esta|estan|tiene|tienen|se siente|se sienten)\b`
+].join('|'));
 
-function detectIntensity(text, pattern) {
-    const match = pattern.exec(text);
-    const preceding = match ? text.slice(0, match.index).trimEnd() : '';
-    if (HIGH_INTENSITY.test(preceding.split(/\s+/).at(-1) || '')) return 'high';
-    if (MODERATE_INTENSITY.test(preceding.split(/\s+/).at(-1) || '')) return 'moderate';
+function normalizeText(text) {
+    return String(text).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[‘’]/g, "'");
+}
+
+function precedingWords(clause, index) {
+    return clause.slice(0, index).trim().split(/\s+/).filter(Boolean);
+}
+
+function isNegated(words) {
+    return words.slice(-NEGATION_WINDOW).some(word => NEGATORS.has(word) || word.endsWith("n't"));
+}
+
+// Intensity comes only from the word right before the symptom; otherwise it is just "reported".
+function detectIntensity(words) {
+    const previous = words.at(-1) || '';
+    if (HIGH_INTENSITY.has(previous)) return 'high';
+    if (MODERATE_INTENSITY.has(previous)) return 'moderate';
     return 'reported';
 }
 
 function extractSignalsFromText(texts, memberName = '') {
-    const seen = new Set();
-    const results = [];
+    const member = normalizeText(memberName).trim();
+    const found = new Map();
     for (const text of texts) {
-        for (const clause of text.split(/[.!?;,]|\bbut\b/i)) {
+        for (const clause of normalizeText(text).split(/[.!?;,:]|\b(?:but|pero|aunque|however)\b/)) {
             const trimmed = clause.trim();
             if (!trimmed) continue;
-            const otherPerson = /\b(my|our|his|her|their)\s+(mother|father|mom|dad|brother|sister|friend|partner|child|daughter|son)\b|\b(he|she|they|someone else)\b/i;
-            if (otherPerson.test(trimmed) && !(memberName && trimmed.toLowerCase().includes(memberName.toLowerCase()))) continue;
-            for (const { pattern, signal } of SIGNAL_PATTERNS) {
-                if (seen.has(signal) || !pattern.test(trimmed)) continue;
-                if (signal !== 'appetite' && /\b(?:not|never|no longer|without)\s+(?:(?:feeling|being|very|really|any)\s+){0,2}(?:tired|exhausted|drained|sad|anxious|stressed|dizzy|in pain|pain|aching|aches|insomnia)\b/i.test(trimmed)) continue;
-                seen.add(signal);
-                results.push({ signal, intensity: detectIntensity(trimmed, pattern), source: 'bee' });
+            if (OTHER_PERSON.test(trimmed) && !(member && trimmed.includes(member))) continue;
+            for (const { pattern, signal, negated } of SIGNAL_PATTERNS) {
+                if (found.has(signal)) continue;
+                for (const match of trimmed.matchAll(pattern)) {
+                    const words = precedingWords(trimmed, match.index);
+                    if (!negated && isNegated(words)) continue;
+                    found.set(signal, { signal, intensity: detectIntensity(words), source: 'bee' });
+                    break;
+                }
             }
         }
     }
-    return results;
+    return [...found.values()];
 }
 
 function memberKey(memberName) {

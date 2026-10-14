@@ -56,3 +56,15 @@ test('ASK CloudFormation YAML retains scoped logs, model access and encrypted no
     assert.match(template, /BedrockResourceArns/);
     assert.doesNotMatch(template, /logs:\*/);
 });
+
+test('roles that run transactional consent checks may call ConditionCheckItem', () => {
+    // Caregiver alerts, Bee ingestion, and Bee revocation commit TransactWriteItems with a
+    // ConditionCheck; without this action they fail with AccessDenied only in AWS.
+    const resources = YAML.parse(source).resources.Resources;
+    for (const role of ['AlexaRole', 'McpRole']) {
+        assert.match(JSON.stringify(resources[role]), /dynamodb:ConditionCheckItem/, role);
+    }
+    assert.doesNotMatch(JSON.stringify(resources.MonitorRole), /ConditionCheckItem/);
+    const template = fs.readFileSync(path.join(__dirname, '../../infrastructure/cfn-deployer/skill-stack.yaml'), 'utf8');
+    assert.match(template, /dynamodb:ConditionCheckItem/);
+});

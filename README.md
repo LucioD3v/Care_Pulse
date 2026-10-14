@@ -181,7 +181,7 @@ If Bee returns a shape the bridge does not recognize, it stops and asks for `nod
 - The bridge runs on the member's computer because Bee's proxy is local and for development only. There is no hosted Bee connector or Alexa account linking yet.
 - Bee does not document its conversation schema. The bridge finds `utterances` anywhere in a conversation and uses `speaker` labels; verify with `--list-speakers` before sending. Only the first page of facts and conversations is read.
 - Bee's API does not document sleep or health data; `healthKit.sleepHours` must come from another source.
-- Signal detection is English keyword matching and does not handle negation ("not tired").
+- Signal detection is rule-based English and Spanish keyword matching, not a language model. It skips negated symptoms ("not tired", "no estoy triste") and symptoms about other people ("my mom is tired", "mi hijo tiene dolor"), and prefers missing a symptom over attributing someone else's.
 - The MCP API key is still shared; the link code limits which member a caller can write to, not who may call.
 
 ## Privacy Blueprint and Security

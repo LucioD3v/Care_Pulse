@@ -122,8 +122,23 @@ function isText(value) {
     return typeof value === 'string' && value.trim().length > 0;
 }
 
-// One export per fact and per conversation, keyed by Bee's own timestamp, so
-// re-running the bridge is skipped by CarePulse instead of duplicating events.
+// CarePulse contract limits for ingest_bee_context.
+const MAX_UTTERANCES_PER_EXPORT = 500;
+const MAX_TEXT_LENGTH = 10000;
+const MAX_SOURCE_ID_LENGTH = 200;
+
+function sourceIdFor(kind, id, part = 0) {
+    if (id === undefined || id === null || id === '') return {};
+    const suffix = part ? ':part' + part : '';
+    return { sourceId: (kind + ':' + String(id)).slice(0, MAX_SOURCE_ID_LENGTH - suffix.length) + suffix };
+}
+
+function clip(text) {
+    return text.length > MAX_TEXT_LENGTH ? text.slice(0, MAX_TEXT_LENGTH) : text;
+}
+
+// One export per fact and per conversation (split when longer than the contract allows), keyed by
+// Bee's timestamp and ID, so re-running the bridge is skipped by CarePulse instead of duplicating events.
 function buildExports({ facts, conversations, wearerSpeakers, sinceMs }) {
     const wearers = new Set(wearerSpeakers.map(String));
     const stats = {
@@ -141,8 +156,8 @@ function buildExports({ facts, conversations, wearerSpeakers, sinceMs }) {
         if (fact.confirmed !== true) { stats.unconfirmedFacts++; continue; }
         stats.confirmedFacts++;
         exports.push({ kind: 'fact', beeExport: { exportedAt,
-            ...(fact.id !== undefined ? { sourceId: 'fact:' + fact.id } : {}),
-            facts: [{ text: fact.text, confirmed: true }] } });
+            ...sourceIdFor('fact', fact.id),
+            facts: [{ text: clip(fact.text), confirmed: true }] } });
     }
 
     for (const conversation of conversations) {
@@ -154,16 +169,19 @@ function buildExports({ facts, conversations, wearerSpeakers, sinceMs }) {
             if (!isText(utterance?.text)) continue;
             if (wearers.has(speakerLabel(utterance))) {
                 stats.wearerUtterances++;
-                utterances.push({ speaker: 'wearer', text: utterance.text });
+                utterances.push({ speaker: 'wearer', text: clip(utterance.text) });
             } else {
                 stats.otherUtterances++;
             }
         }
         if (!utterances.length) continue;
         stats.conversationsUsed++;
-        exports.push({ kind: 'conversation', beeExport: { exportedAt,
-            ...(conversation.summary?.id !== undefined ? { sourceId: 'conversation:' + conversation.summary.id } : {}),
-            conversations: [{ utterances }] } });
+        const parts = Math.ceil(utterances.length / MAX_UTTERANCES_PER_EXPORT);
+        for (let part = 0; part < parts; part++) {
+            exports.push({ kind: 'conversation', beeExport: { exportedAt,
+                ...sourceIdFor('conversation', conversation.summary?.id, parts > 1 ? part + 1 : 0),
+                conversations: [{ utterances: utterances.slice(part * MAX_UTTERANCES_PER_EXPORT, (part + 1) * MAX_UTTERANCES_PER_EXPORT) }] } });
+        }
     }
     return { exports, stats };
 }

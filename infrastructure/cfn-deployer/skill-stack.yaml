@@ -57,6 +57,7 @@ Resources:
                   - dynamodb:GetItem
                   - dynamodb:UpdateItem
                   - dynamodb:DeleteItem
+                  - dynamodb:ConditionCheckItem
                 Resource:
                   - !GetAtt CarePulseTable.Arn
                   - !Sub '${CarePulseTable.Arn}/index/*'
