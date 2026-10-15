@@ -411,8 +411,10 @@ async function resolveCaregiver({ ownerId, memberName, caregiverName }) {
 async function requestConsent({ ownerId, memberName, caregiverName, signal, followupId,
     expiresAt = Math.floor(Date.now() / 1000) + 36 * 60 * 60 }) {
     authorizeMember(ownerId, memberName, true);
-    // A model tool call cannot stand in for a person's affirmative confirmation.
-    if (!isDemo() && currentPrincipal()?.channel !== 'alexa') throw new AccessError();
+    // A model tool call cannot stand in for a person's affirmative confirmation. This also covers
+    // Alexa+ OAuth callers in demo mode, which are driven by a model rather than the skill's YesIntent.
+    const principal = currentPrincipal();
+    if ((!isDemo() || principal?.viaToken) && principal?.channel !== 'alexa') throw new AccessError();
     const followup = await getFollowupById({ ownerId, memberName, followupId });
     const now = Math.floor(Date.now() / 1000);
     if (!followup || followup.status !== 'pending' || followup.signal !== normalized(signal)) {
@@ -485,6 +487,9 @@ async function evaluateAlertPolicy({ ownerId, memberName, caregiverName, signal,
 
 async function sendCaregiverAlert(input) {
     if (!input.ownerId || !input.consentId) throw new Error('A caregiver alert requires an allowed policy decision and active consent.');
+    // Demo alerts go to the shared demo topic without destination verification, so a model-driven
+    // Alexa+ caller must not trigger them; the voice skill still sends the alert after the check-in.
+    if (isDemo() && currentPrincipal()?.viaToken) throw new AccessError();
     authorizeMember(input.ownerId, input.memberName, true);
     const pk = partitionKey(input.ownerId);
     const records = await queryPrefix(pk, 'CONSENT#' + normalized(input.memberName) + '#' + normalized(input.caregiverName) + '#');
@@ -519,7 +524,7 @@ async function sendCaregiverAlert(input) {
     return result;
 }
 
-async function createMcpSession({ protocolVersion = '2025-11-25', ownerId = null } = {}) {
+async function createMcpSession({ protocolVersion = '2025-11-25', ownerId = null, authKind = 'none' } = {}) {
     const sessionId = randomUUID();
     const expiresAt = Math.floor(Date.now() / 1000) + 60 * 60;
     await putRecord({
@@ -528,6 +533,7 @@ async function createMcpSession({ protocolVersion = '2025-11-25', ownerId = null
         entityType: 'MCP_SESSION',
         sessionId,
         ownerId,
+        authKind,
         protocolVersion,
         initialized: false,
         createdAt: new Date().toISOString(),
@@ -614,6 +620,11 @@ async function callTool(name, input, { context } = {}) {
         complete_followup: async input => {
             const followup = await getFollowupById(input);
             if (!followup) throw new TypeError('Follow-up was not found.');
+            // Alexa+ cannot send demo alerts, so a check-in that carries caregiver permission must be
+            // finished in the voice skill, which records the answer and sends the authorized alert.
+            if (isDemo() && currentPrincipal()?.viaToken && followup.consentId) {
+                throw Object.assign(new Error('This check-in has caregiver permission. Ask the person to finish it in the CarePulse skill: "Alexa, open CarePulse".'), { expose: true });
+            }
             return completeFollowup({ followup, status: input.status });
         },
         cancel_followup: cancelFollowup,

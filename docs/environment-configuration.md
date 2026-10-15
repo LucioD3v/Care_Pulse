@@ -2,7 +2,7 @@
 
 This is the reference for configuration read by the current skill, MCP gateway, and local Bee tooling. Copy `.env.example` to an ignored `.env` only for a new checkout; keep an existing `.env` and its local values. Serverless accepts `--param` overrides before `env:` fallbacks. A variable shown in `.env.example` is not automatically passed to every Lambda function: only values mapped in `serverless.yml` are deployed.
 
-The current project is a **synthetic-data hackathon demo**. `production` selects stricter runtime paths, but OAuth/account linking, member onboarding, and recipient provisioning are not complete.
+The current project is a **synthetic-data hackathon demo**. `production` selects stricter runtime paths, but member onboarding (binding a Cognito user to an existing owner) and recipient provisioning are not complete. The Alexa+ OAuth path is provisioned; see [alexa-plus-addon.md](alexa-plus-addon.md).
 
 ## Mode and storage
 
@@ -26,6 +26,11 @@ For a local, table-free run, use `CARE_MODE=demo` and `CARE_STORAGE_MODE=memory`
 | `MCP_MEMORY_SIZE` | Memory in MB for the MCP gateway Lambda; default `1024`. Lambda CPU scales with memory, which shortens initialization and request handling. Serverless also accepts `mcpMemorySize`. | Optional. |
 | `MCP_PROVISIONED_CONCURRENCY` | Pre-initialized MCP environments; default `0` (off). Set `1` while recording the demo and during judging so cold starts stay off the request path; it is billed while enabled. Serverless also accepts `mcpProvisionedConcurrency`. | Recommended `1` for Alexa+ testing. |
 | `MCP_ALLOWED_ORIGINS` | Comma-separated browser origins, for example `https://app.example.com`; empty by default. Requests with an `Origin` header are rejected unless the exact origin is listed. Requests without an `Origin` header are not filtered by this setting. | Optional. |
+| `ALEXA_REDIRECT_URIS` | Comma-separated Alexa+ redirect URIs, with no spaces after the commas, printed by `alexa-ai configure-account-linking`; registered as Cognito callback URLs. Serverless also accepts `alexaRedirectUris`. Defaults to a placeholder until the URIs are known. | Required before account linking can complete; redeploy after setting it. |
+| `MCP_RESOURCE_URL` | Canonical MCP URL published as `resource` in the protected resource metadata. Defaults to `https://<request host>/mcp`. Serverless also accepts `mcpResourceUrl`. | Only with a custom domain; it must match the add-on manifest URL exactly. |
+| `OAUTH_ISSUER_URL` | Base URL published as the authorization server. Defaults to `https://<request host>`. Serverless also accepts `oauthIssuerUrl`. | Only with a custom domain. |
+| `DEMO_TOKEN_SUBJECT` | Demo mode only: the Cognito `sub` of the single user allowed to act for `DEMO_OWNER_ID` through OAuth (Alexa+). Empty, the default, refuses every token. Serverless also accepts `demoTokenSubject`. | Required for Alexa+ testing in demo mode. |
+| `MCP_JWT_ISSUER`, `MCP_JWKS_URI`, `MCP_JWT_CLIENT_IDS`, `COGNITO_DOMAIN_URL`, `MCP_OAUTH_SCOPES` | Set by the stack from the Cognito user pool, domain, and app client. Tokens are accepted by issuer, signature, `token_use: access`, the `carepulse/access` scope, and either an allowed `aud` (`MCP_JWT_AUDIENCE`) or an allowed `client_id`. | Managed by Serverless; do not override. |
 | `AWS_REGION` | AWS region name such as `us-east-1`; Serverless and SDK clients default to `us-east-1`. `--region` takes precedence for Serverless. | Optional if the default is correct. |
 
 ## Voice, member defaults, and alerts

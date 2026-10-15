@@ -73,6 +73,16 @@ functions:
       MCP_API_KEY: ${param:mcpApiKey, env:MCP_API_KEY, env:CAREPULSE_MCP_KEY}
       MCP_ALLOWED_ORIGINS: ${param:mcpAllowedOrigins, env:MCP_ALLOWED_ORIGINS, ''}
       SNS_TOPIC_ARN: { Ref: CaregiverAlertsTopic }
+      # Alexa+ add-on OAuth: Cognito issues tokens; oauth_endpoints.js publishes discovery metadata.
+      MCP_JWT_ISSUER: { Fn::Sub: 'https://cognito-idp.${AWS::Region}.amazonaws.com/${McpUserPool}' }
+      MCP_JWKS_URI: { Fn::Sub: 'https://cognito-idp.${AWS::Region}.amazonaws.com/${McpUserPool}/.well-known/jwks.json' }
+      MCP_JWT_CLIENT_IDS: { Ref: McpAlexaClient }
+      COGNITO_DOMAIN_URL: { Fn::Sub: 'https://${McpUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com' }
+      MCP_OAUTH_SCOPES: carepulse/access
+      MCP_RESOURCE_URL: ${param:mcpResourceUrl, env:MCP_RESOURCE_URL, ''}
+      OAUTH_ISSUER_URL: ${param:oauthIssuerUrl, env:OAUTH_ISSUER_URL, ''}
+      # Demo mode: the only Cognito "sub" allowed to act for DEMO_OWNER_ID. Empty disables token access.
+      DEMO_TOKEN_SUBJECT: ${param:demoTokenSubject, env:DEMO_TOKEN_SUBJECT, ''}
     package:
       patterns:
         - lambda/**
@@ -90,6 +100,21 @@ functions:
       - httpApi:
           path: /mcp
           method: GET
+      - httpApi:
+          path: /.well-known/oauth-protected-resource
+          method: GET
+      - httpApi:
+          path: /.well-known/oauth-protected-resource/mcp
+          method: GET
+      - httpApi:
+          path: /.well-known/oauth-authorization-server
+          method: GET
+      - httpApi:
+          path: /oauth/authorize
+          method: GET
+      - httpApi:
+          path: /oauth/token
+          method: POST
 
   followupMonitor:
     name: carepulse-${sls:stage}-followup-monitor
@@ -119,6 +144,60 @@ resources:
     HasBedrock: { Fn::Not: [{ Fn::Equals: ["${param:bedrockModelId, env:BEDROCK_MODEL_ID, ''}", ''] }] }
     HasAlarmTopic: { Fn::Not: [{ Fn::Equals: [{ Ref: OperationsAlarmTopicArn }, ''] }] }
   Resources:
+    McpUserPool:
+      Type: AWS::Cognito::UserPool
+      # A replaced pool issues new user IDs (sub) and breaks DEMO_TOKEN_SUBJECT and Alexa+ account linking.
+      DeletionPolicy: Retain
+      UpdateReplacePolicy: Retain
+      Properties:
+        UserPoolName: carepulse-${sls:stage}-alexa-plus
+        UsernameAttributes: [email]
+        AutoVerifiedAttributes: [email]
+        AdminCreateUserConfig:
+          AllowAdminCreateUserOnly: true
+        Policies:
+          PasswordPolicy:
+            MinimumLength: 12
+            RequireLowercase: true
+            RequireUppercase: true
+            RequireNumbers: true
+            RequireSymbols: true
+    McpUserPoolDomain:
+      Type: AWS::Cognito::UserPoolDomain
+      Properties:
+        UserPoolId: { Ref: McpUserPool }
+        Domain: { Fn::Sub: 'carepulse-${sls:stage}-${AWS::AccountId}' }
+    McpResourceServer:
+      Type: AWS::Cognito::UserPoolResourceServer
+      Properties:
+        UserPoolId: { Ref: McpUserPool }
+        Identifier: carepulse
+        Name: CarePulse MCP
+        Scopes:
+          - ScopeName: access
+            ScopeDescription: Use CarePulse wellness tools for the linked account
+    McpAlexaClient:
+      Type: AWS::Cognito::UserPoolClient
+      DependsOn: McpResourceServer
+      Properties:
+        UserPoolId: { Ref: McpUserPool }
+        ClientName: carepulse-${sls:stage}-alexa-plus
+        GenerateSecret: true
+        AllowedOAuthFlowsUserPoolClient: true
+        AllowedOAuthFlows: [code]
+        AllowedOAuthScopes: [carepulse/access]
+        SupportedIdentityProviders: [COGNITO]
+        # Replace with the redirect URIs that "alexa-ai configure-account-linking" prints, then redeploy.
+        # Separate them with commas and no spaces; CloudFormation cannot trim them.
+        CallbackURLs:
+          Fn::Split: [',', "${param:alexaRedirectUris, env:ALEXA_REDIRECT_URIS, 'https://localhost/alexa-redirect-pending'}"]
+        PreventUserExistenceErrors: ENABLED
+        EnableTokenRevocation: true
+        AccessTokenValidity: 60
+        RefreshTokenValidity: 30
+        TokenValidityUnits:
+          AccessToken: minutes
+          RefreshToken: days
     CarePulseTable:
       Type: AWS::DynamoDB::Table
       DeletionPolicy: Retain
@@ -434,6 +513,19 @@ resources:
           Fn::If: [HasAlarmTopic, [{ Ref: OperationsAlarmTopicArn }], { Ref: 'AWS::NoValue' }]
 
   Outputs:
+    McpProtectedResourceMetadataUrl:
+      Description: Alexa+ discovers the OAuth server from this document.
+      Value:
+        Fn::Join:
+          - ''
+          - - Fn::GetAtt: [HttpApi, ApiEndpoint]
+            - /.well-known/oauth-protected-resource
+    McpOAuthClientId:
+      Description: Pass to "alexa-ai configure-account-linking --client-id". Read the secret from the Cognito console.
+      Value: { Ref: McpAlexaClient }
+    McpUserPoolId:
+      Description: Create the demo sign-in user here (admin-created users only).
+      Value: { Ref: McpUserPool }
     AlexaLambdaArn:
       Description: Paste this ARN into the Alexa custom skill endpoint configuration.
       Value:

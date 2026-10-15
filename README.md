@@ -109,7 +109,11 @@ It reports the first request (which includes any cold start) and p50/p95/max for
 
 ### Tools Currently Returned by `tools/list`
 
-The MCP catalog contains `get_care_context`, `log_wellness_event`, `get_wellness_history`, `compare_with_baseline`, `create_followup`, `request_consent`, `send_caregiver_alert`, `ingest_bee_context`, `list_followups`, `complete_followup`, `cancel_followup`, and `revoke_consent`. The Node.js JSON-RPC Streamable HTTP gateway negotiates `2025-11-25`, `2025-06-18`, or `2025-03-26`. Demo clients use `x-carepulse-mcp-key` and an initialized MCP session. Completion saves the result and any alert job atomically; it does not itself confirm notification delivery. Production mode requires a verified bearer access token and a server-side identity/profile binding; no identity provider is provisioned by this repository.
+The MCP catalog contains `get_care_context`, `log_wellness_event`, `get_wellness_history`, `compare_with_baseline`, `create_followup`, `request_consent`, `send_caregiver_alert`, `ingest_bee_context`, `list_followups`, `complete_followup`, `cancel_followup`, and `revoke_consent`. The Node.js JSON-RPC Streamable HTTP gateway negotiates `2025-11-25`, `2025-06-18`, or `2025-03-26`. Demo clients use `x-carepulse-mcp-key` and an initialized MCP session. Completion saves the result and any alert job atomically; it does not itself confirm notification delivery. Production mode requires a verified bearer access token and a server-side identity/profile binding.
+
+### Alexa+ add-on (OAuth)
+
+Alexa+ reaches MCP servers through an Alexa+ MCP add-on that requires OAuth 2.1 with PKCE (S256). The stack provisions an Amazon Cognito user pool and app client, and the gateway publishes `/.well-known/oauth-protected-resource` plus its own authorization-server metadata (Cognito's discovery omits `code_challenge_methods_supported`). `/oauth/authorize` and `/oauth/token` forward to Cognito. In demo mode a verified token acts for `DEMO_OWNER_ID` and tools hide `ownerId`; the shared key keeps working for other clients. Setup steps: [docs/alexa-plus-addon.md](docs/alexa-plus-addon.md). Privacy policy for account linking: [docs/privacy-policy.md](docs/privacy-policy.md).
 
 ## Bee Wearable Ingestion (Preview)
 
