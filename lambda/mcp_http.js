@@ -157,7 +157,10 @@ async function handle(event) {
 // other Service=mcp metrics only describe MCP calls.
 const handleOAuthRequest = (event, context) => withRequest('mcp-oauth', context, 12000, async () => {
     try {
-        return await handleOAuth(event);
+        const result = await handleOAuth(event);
+        // Returned 5xx (Cognito unreachable, not configured, or an upstream 5xx) must reach McpOAuthErrorsAlarm too.
+        if (result.statusCode >= 500) metric('ServiceErrors');
+        return result;
     } catch {
         metric('ServiceErrors');
         return response(500, { error: 'server_error' });

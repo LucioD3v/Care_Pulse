@@ -164,3 +164,32 @@ test('SNS is preloaded only in provisioned-concurrency environments', () => {
     assert.equal(probe('provisioned-concurrency'), 'true');
     assert.equal(probe('on-demand'), 'false');
 });
+
+test('returned OAuth 5xx responses count as mcp-oauth service errors; client errors do not', async t => {
+    const lines = [];
+    t.mock.method(console, 'info', line => lines.push(String(line)));
+    const call = query => handler({ rawPath: '/oauth/authorize', rawQueryString: query, headers: { host: 'h.example' },
+        requestContext: { domainName: 'h.example', http: { method: 'GET', path: '/oauth/authorize' } } }, {});
+    const errors = () => lines.filter(line => line.includes('"ServiceErrors"')).map(line => JSON.parse(line).Service);
+
+    delete process.env.COGNITO_DOMAIN_URL;
+    const unconfigured = await call('response_type=code&client_id=c&redirect_uri=https://a.example/r&code_challenge_method=S256&code_challenge=' + 'a'.repeat(43));
+    assert.equal(unconfigured.statusCode, 503);
+    assert.deepEqual(errors(), ['mcp-oauth']);
+
+    process.env.COGNITO_DOMAIN_URL = 'https://auth.example';
+    const badRequest = await call('response_type=token');
+    assert.equal(badRequest.statusCode, 400);
+    assert.deepEqual(errors(), ['mcp-oauth'], 'a 4xx is not a service error');
+});
+
+test('shared-key runs work on deployments without DEMO_OWNER_ID when --owner-id is given', async t => {
+    delete process.env.DEMO_OWNER_ID;
+    const mcpUrl = await startGateway(t);
+    await assert.rejects(latency.run({ mcpUrl, key: 'latency-key', requests: 1, member: 'Elena', limitMs: 5000 }, () => {}),
+        /pass --owner-id/);
+    const result = await latency.run({ mcpUrl, key: 'latency-key', ownerId: 'latency-owner', requests: 2, member: 'Elena', limitMs: 5000 }, () => {});
+    assert.equal(result.get_care_context.count, 2);
+    assert.equal(latency.parseArgs(['--owner-id', 'o1'], {}).ownerId, 'o1');
+    assert.equal(latency.parseArgs([], { CAREPULSE_OWNER_ID: 'o2' }).ownerId, 'o2');
+});

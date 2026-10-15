@@ -11,6 +11,9 @@ const HELP = `Usage: node scripts/measure_mcp_latency.js --mcp-url <endpoint>/mc
 Options:
   --requests <n>     Measured calls per method (default 20)
   --member <name>    Member for get_care_context (default Elena)
+  --owner-id <id>    Owner for get_care_context with the shared key, when the deployment has no
+                     DEMO_OWNER_ID (or CAREPULSE_OWNER_ID). Ignored with an OAuth token, which acts
+                     as its own owner.
   --limit-ms <n>     Pass/fail threshold (default 500, the Alexa+ limit). The run fails if the
                      first request (initialize, which includes any cold start) or the worst p95
                      is not under it.
@@ -46,12 +49,13 @@ function report(results, log) {
 function parseArgs(argv, env = process.env) {
     const options = {
         mcpUrl: env.CAREPULSE_MCP_URL, token: env.CAREPULSE_MCP_TOKEN, key: env.CAREPULSE_MCP_KEY,
-        requests: 20, member: 'Elena', limitMs: 500, help: false
+        ownerId: env.CAREPULSE_OWNER_ID, requests: 20, member: 'Elena', limitMs: 500, help: false
     };
     const flags = {
         '--mcp-url': value => { options.mcpUrl = value; },
         '--requests': value => { options.requests = positiveInteger('--requests', value); },
         '--member': value => { options.member = value; },
+        '--owner-id': value => { options.ownerId = value; },
         '--limit-ms': value => { options.limitMs = positiveInteger('--limit-ms', value); }
     };
     for (let index = 0; index < argv.length; index++) {
@@ -138,14 +142,22 @@ async function run(options, log = console.log) {
         const methods = {
             ping: () => client.post('ping', {}),
             'tools/list': () => client.post('tools/list', {}),
-            get_care_context: () => client.post('tools/call', { name: 'get_care_context', arguments: { memberName: options.member } })
+            // Token callers cannot name an owner; shared-key callers may when the deployment has no DEMO_OWNER_ID.
+            get_care_context: () => client.post('tools/call', { name: 'get_care_context', arguments: {
+                memberName: options.member, ...(!options.token && options.ownerId ? { ownerId: options.ownerId } : {})
+            } })
         };
         for (const [name, call] of Object.entries(methods)) {
             const samples = [];
             try {
                 for (let index = 0; index < options.requests; index++) {
                     const { elapsed, body } = await call();
-                    if (body?.result?.isError) throw new Error(`${name} returned a tool error: ${body.result.content?.[0]?.text || 'unknown'}`);
+                    if (body?.result?.isError) {
+                        const text = body.result.content?.[0]?.text || 'unknown';
+                        const hint = name === 'get_care_context' && !options.token && !options.ownerId
+                            ? ' If the deployment has no DEMO_OWNER_ID, pass --owner-id <id>.' : '';
+                        throw new Error(`${name} returned a tool error: ${text}${hint}`);
+                    }
                     samples.push(elapsed);
                 }
             } finally {
