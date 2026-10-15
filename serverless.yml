@@ -141,6 +141,9 @@ resources:
   Resources:
     McpUserPool:
       Type: AWS::Cognito::UserPool
+      # A replaced pool issues new user IDs (sub) and breaks DEMO_TOKEN_SUBJECT and Alexa+ account linking.
+      DeletionPolicy: Retain
+      UpdateReplacePolicy: Retain
       Properties:
         UserPoolName: carepulse-${sls:stage}-alexa-plus
         UsernameAttributes: [email]
@@ -180,6 +183,7 @@ resources:
         AllowedOAuthScopes: [carepulse/access]
         SupportedIdentityProviders: [COGNITO]
         # Replace with the redirect URIs that "alexa-ai configure-account-linking" prints, then redeploy.
+        # Separate them with commas and no spaces; CloudFormation cannot trim them.
         CallbackURLs:
           Fn::Split: [',', "${param:alexaRedirectUris, env:ALEXA_REDIRECT_URIS, 'https://localhost/alexa-redirect-pending'}"]
         PreventUserExistenceErrors: ENABLED

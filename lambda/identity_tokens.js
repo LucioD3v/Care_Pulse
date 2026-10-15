@@ -22,7 +22,9 @@ async function verifyToken(token) {
     const audienceOk = audiences.length ? audiences.some(value => audience.includes(value))
         : clientIds.includes(payload.client_id);
     if (!audienceOk) throw new Error('The token was not issued for CarePulse.');
-    if (payload.token_use !== 'access' || !String(payload.scope || '').split(' ').includes('carepulse/access')) {
+    // The required scope is the one discovery advertises (first entry of MCP_OAUTH_SCOPES).
+    const requiredScope = (process.env.MCP_OAUTH_SCOPES || 'carepulse/access').split(/[\s,]+/).filter(Boolean)[0];
+    if (payload.token_use !== 'access' || !String(payload.scope || '').split(' ').includes(requiredScope)) {
         throw new Error('A scoped access token is required.');
     }
     return payload;

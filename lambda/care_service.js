@@ -524,7 +524,7 @@ async function sendCaregiverAlert(input) {
     return result;
 }
 
-async function createMcpSession({ protocolVersion = '2025-11-25', ownerId = null } = {}) {
+async function createMcpSession({ protocolVersion = '2025-11-25', ownerId = null, authKind = 'none' } = {}) {
     const sessionId = randomUUID();
     const expiresAt = Math.floor(Date.now() / 1000) + 60 * 60;
     await putRecord({
@@ -533,6 +533,7 @@ async function createMcpSession({ protocolVersion = '2025-11-25', ownerId = null
         entityType: 'MCP_SESSION',
         sessionId,
         ownerId,
+        authKind,
         protocolVersion,
         initialized: false,
         createdAt: new Date().toISOString(),
@@ -619,6 +620,11 @@ async function callTool(name, input, { context } = {}) {
         complete_followup: async input => {
             const followup = await getFollowupById(input);
             if (!followup) throw new TypeError('Follow-up was not found.');
+            // Alexa+ cannot send demo alerts, so a check-in that carries caregiver permission must be
+            // finished in the voice skill, which records the answer and sends the authorized alert.
+            if (isDemo() && currentPrincipal()?.viaToken && followup.consentId) {
+                throw Object.assign(new Error('This check-in has caregiver permission. Ask the person to finish it in the CarePulse skill: "Alexa, open CarePulse".'), { expose: true });
+            }
             return completeFollowup({ followup, status: input.status });
         },
         cancel_followup: cancelFollowup,
