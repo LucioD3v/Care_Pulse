@@ -1,14 +1,14 @@
 'use strict';
 
-const { timingSafeEqual } = require('node:crypto');
 const { MCP_TOOLS } = require('./mcp_tools');
 const { callMcpTool } = require('./mcp_contracts');
 const { createMcpSession, getMcpSession, deleteMcpSession } = require('./care_service');
 const { updateRecord } = require('./care_repository');
 const { metric, withRequest } = require('./observability');
 const { InvalidBeeLinkError } = require('./bee_link');
-const { fromMcp, withPrincipal, currentPrincipal, AccessError } = require('./access_control');
+const { fromMcp, withPrincipal, currentPrincipal, AccessError, authKind } = require('./access_control');
 const { isDemo } = require('./runtime_config');
+const { isOAuthRoute, handleOAuth } = require('./oauth_endpoints');
 const VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26'];
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
@@ -22,10 +22,17 @@ function response(statusCode, body, headers = {}) {
 }
 function rpcError(id, code, message) { return { jsonrpc: '2.0', id: id ?? null, error: { code, message } }; }
 function rpcResult(id, result) { return { jsonrpc: '2.0', id, result }; }
-function authorized(event) {
-    const expected = Buffer.from(process.env.MCP_API_KEY || '');
-    const actual = Buffer.from(header(event, 'x-carepulse-mcp-key'));
-    return expected.length > 0 && expected.length === actual.length && timingSafeEqual(expected, actual);
+// Tools a caller may neither list nor call. Consent needs the person's spoken "yes" in the skill, and
+// demo alerts go to the shared topic without destination verification, so model-driven OAuth callers
+// cannot use them. Service-layer guards enforce the same rules as defense in depth.
+function hiddenTools(principal) {
+    if (!principal?.viaToken) return new Set();
+    return new Set(['request_consent', ...(isDemo() ? ['send_caregiver_alert'] : [])]);
+}
+
+function sessionMatches(session) {
+    const principal = currentPrincipal();
+    return Boolean(session) && session.ownerId === principal?.ownerId && (session.authKind || 'none') === authKind(principal);
 }
 function validEnvelope(request) {
     return isObject(request) && request.jsonrpc === '2.0'
@@ -36,7 +43,8 @@ function validEnvelope(request) {
 }
 
 async function handle(event) {
-    if (isDemo() && !authorized(event)) return response(401, rpcError(null, -32001, 'Unauthorized MCP request.'));
+    // No WWW-Authenticate header: Alexa+ starts account linking on a plain 401.
+    if (isDemo() && !currentPrincipal()?.viaKey && !currentPrincipal()?.viaToken) return response(401, rpcError(null, -32001, 'Unauthorized MCP request.'));
     const origin = header(event, 'origin');
     const origins = (process.env.MCP_ALLOWED_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean);
     if (origin && !origins.includes(origin)) return response(403, rpcError(null, -32001, 'Origin is not allowed.'));
@@ -49,7 +57,7 @@ async function handle(event) {
 
     if (method === 'DELETE') {
         const session = await getMcpSession(sessionId);
-        if (!session || session.ownerId !== currentPrincipal()?.ownerId) return response(404, rpcError(null, -32000, 'Unknown or expired session.'));
+        if (!sessionMatches(session)) return response(404, rpcError(null, -32000, 'Unknown or expired session.'));
         if (suppliedVersion && suppliedVersion !== session.protocolVersion) return response(400, rpcError(null, -32602, 'Session protocol version mismatch.'));
         await deleteMcpSession(sessionId);
         return response(204);
@@ -81,7 +89,7 @@ async function handle(event) {
             return response(400, rpcError(request.id, -32602, 'Invalid initialization parameters.'));
         }
         const version = VERSIONS.includes(params.protocolVersion) ? params.protocolVersion : VERSIONS[0];
-        const session = await createMcpSession({ protocolVersion: version, ownerId: currentPrincipal()?.ownerId });
+        const session = await createMcpSession({ protocolVersion: version, ownerId: currentPrincipal()?.ownerId, authKind: authKind(currentPrincipal()) });
         return response(200, rpcResult(request.id, {
             protocolVersion: version, capabilities: { tools: { listChanged: false } },
             serverInfo: { name: 'carepulse-mcp', version: '1.1.0' },
@@ -89,7 +97,7 @@ async function handle(event) {
         }), { 'mcp-session-id': session.sessionId, 'mcp-protocol-version': version });
     }
     const session = await getMcpSession(sessionId);
-    if (!session || session.ownerId !== currentPrincipal()?.ownerId) return response(404, rpcError(request.id, -32000, 'Unknown or expired session.'));
+    if (!sessionMatches(session)) return response(404, rpcError(request.id, -32000, 'Unknown or expired session.'));
     const headers = { 'mcp-session-id': sessionId, 'mcp-protocol-version': session.protocolVersion };
     if (suppliedVersion && suppliedVersion !== session.protocolVersion) return response(400, rpcError(request.id, -32602, 'Session protocol version mismatch.'), headers);
     if (notification) {
@@ -99,7 +107,13 @@ async function handle(event) {
     if (request.method === 'ping') return response(200, rpcResult(request.id, {}), headers);
     if (!session.initialized) return response(400, rpcError(request.id, -32000, 'Session initialization is incomplete.'), headers);
     if (request.method === 'tools/list') {
-        const catalog = isDemo() ? MCP_TOOLS : MCP_TOOLS.map(tool => {
+        // Only the shared-key demo client may name an owner; token callers act as themselves.
+        // Token callers never see request_consent: consent requires the person's spoken "yes" in the skill.
+        // Demo token callers also cannot send caregiver alerts (see sendCaregiverAlert).
+        const viaToken = Boolean(currentPrincipal()?.viaToken);
+        const hidden = hiddenTools(currentPrincipal());
+        const visible = MCP_TOOLS.filter(tool => !hidden.has(tool.name));
+        const catalog = isDemo() && !viaToken ? MCP_TOOLS : visible.map(tool => {
             const schema = structuredClone(tool.inputSchema);
             delete schema.properties.ownerId;
             schema.required = schema.required.filter(name => name !== 'ownerId');
@@ -109,11 +123,13 @@ async function handle(event) {
     }
     if (request.method === 'tools/call') {
         const name = request.params?.name;
-        if (!MCP_TOOLS.some(tool => tool.name === name)) return response(200, rpcError(request.id, -32602, 'Unknown tool.'), headers);
+        if (!MCP_TOOLS.some(tool => tool.name === name) || hiddenTools(currentPrincipal()).has(name)) {
+            return response(200, rpcError(request.id, -32602, 'Unknown tool.'), headers);
+        }
         try {
             const args = request.params?.arguments;
             const principal = currentPrincipal();
-            if (!principal.demo && args?.ownerId && args.ownerId !== principal.ownerId) throw new AccessError();
+            if ((!principal.demo || principal.viaToken) && args?.ownerId && args.ownerId !== principal.ownerId) throw new AccessError();
             const input = name === 'ingest_bee_context' ? args
                 : { ...args, ...(principal.ownerId ? { ownerId: principal.ownerId } : {}) };
             const result = await withPrincipal({ ...principal, requestId: sessionId + ':' + request.id },
@@ -128,6 +144,7 @@ async function handle(event) {
             return response(200, rpcResult(request.id, {
                 content: [{ type: 'text', text: error instanceof InvalidBeeLinkError
                     ? new InvalidBeeLinkError().message
+                    : error?.expose === true ? error.message
                     : error instanceof TypeError ? 'Invalid tool arguments.' : 'The tool could not complete the request.' }],
                 isError: true
             }), headers);
@@ -137,6 +154,14 @@ async function handle(event) {
 }
 
 exports.handler = (event, context) => withRequest('mcp', context, 12000, async () => {
+    if (isOAuthRoute(event)) {
+        try {
+            return await handleOAuth(event);
+        } catch {
+            metric('ServiceErrors');
+            return response(500, { error: 'server_error' });
+        }
+    }
     try {
         const principal = await fromMcp(event);
         const result = await withPrincipal(principal, () => handle(event));

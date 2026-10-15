@@ -1,7 +1,7 @@
 'use strict';
 
 const { AsyncLocalStorage } = require('node:async_hooks');
-const { createHash } = require('node:crypto');
+const { createHash, timingSafeEqual } = require('node:crypto');
 const { getRecord, partitionKey } = require('./care_repository');
 const { isDemo } = require('./runtime_config');
 const principals = new AsyncLocalStorage();
@@ -31,17 +31,49 @@ async function fromAlexa(event) {
     return principalForOwner(ownerId, event.request?.requestId, 'alexa');
 }
 
-async function fromMcp(event) {
-    if (isDemo()) return { ownerId: process.env.DEMO_OWNER_ID || null, channel: 'mcp', demo: true };
-    const header = Object.entries(event.headers || {}).find(([key]) => key.toLowerCase() === 'authorization')?.[1];
+async function verifiedClaims(header) {
     if (typeof header !== 'string' || !header.startsWith('Bearer ')) throw new AccessError();
     let claims;
     try { claims = await require('./identity_tokens').verifyToken(header.slice(7)); }
     catch { throw new AccessError(); }
     if (typeof claims.sub !== 'string' || !claims.sub) throw new AccessError();
+    return claims;
+}
+
+function requestHeader(event, name) {
+    const value = Object.entries(event.headers || {}).find(([key]) => key.toLowerCase() === name)?.[1];
+    return typeof value === 'string' ? value : undefined;
+}
+
+function sharedKeyValid(event) {
+    const expected = Buffer.from(process.env.MCP_API_KEY || '');
+    const actual = Buffer.from(requestHeader(event, 'x-carepulse-mcp-key') || '');
+    return expected.length > 0 && expected.length === actual.length && timingSafeEqual(expected, actual);
+}
+
+// Identifies how a session was opened, so a session can only be reused by the same kind of caller.
+function authKind(principal) {
+    if (principal?.viaToken) return 'token:' + digest(principal.subject || '').slice(0, 32);
+    return principal?.viaKey ? 'key' : 'none';
+}
+
+async function fromMcp(event) {
+    const header = requestHeader(event, 'authorization');
+    if (isDemo()) {
+        // A valid shared key is a trusted operator client, regardless of any other Authorization header.
+        if (sharedKeyValid(event)) return { ownerId: process.env.DEMO_OWNER_ID || null, channel: 'mcp', demo: true, viaKey: true };
+        if (header === undefined) return { ownerId: process.env.DEMO_OWNER_ID || null, channel: 'mcp', demo: true };
+        // Alexa+ authenticates with OAuth. In demo mode only the single configured Cognito subject may
+        // act for the demo owner, so a second account can never reach the same wellness records.
+        const claims = await verifiedClaims(header);
+        const subject = process.env.DEMO_TOKEN_SUBJECT;
+        if (!process.env.DEMO_OWNER_ID || !subject || claims.sub !== subject) throw new AccessError();
+        return { ownerId: process.env.DEMO_OWNER_ID, channel: 'mcp', demo: true, viaToken: true, subject: claims.sub };
+    }
+    const claims = await verifiedClaims(header);
     const binding = await getRecord('IDENTITY#' + digest(claims.iss + '|' + claims.sub), 'BINDING');
     if (!binding || binding.status !== 'active') throw new AccessError();
-    return principalForOwner(binding.ownerId, event.requestContext?.requestId, 'mcp');
+    return { ...await principalForOwner(binding.ownerId, event.requestContext?.requestId, 'mcp'), viaToken: true, subject: claims.sub };
 }
 
 function authorizeMember(ownerId, memberName, write = false) {
@@ -65,4 +97,4 @@ function defaultMember() {
     return member.name;
 }
 
-module.exports = { AccessError, currentPrincipal, withPrincipal, fromAlexa, fromMcp, authorizeMember, defaultMember, principalForOwner, digest };
+module.exports = { AccessError, currentPrincipal, withPrincipal, fromAlexa, fromMcp, authorizeMember, defaultMember, principalForOwner, digest, sharedKeyValid, authKind };
