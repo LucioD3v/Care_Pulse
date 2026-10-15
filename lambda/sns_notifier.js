@@ -14,6 +14,10 @@ function snsSdk() {
     return sns;
 }
 
+// Provisioned environments initialize ahead of traffic, so load SNS there and keep the first
+// caregiver alert off the cold path; on-demand environments still load it only when needed.
+if (process.env.AWS_LAMBDA_INITIALIZATION_TYPE === 'provisioned-concurrency') snsSdk();
+
 function formatAlert({ memberName, caregiverName, signal, followupStatus, consentId }) {
     return {
         subject: 'CarePulse check-in',
@@ -44,7 +48,8 @@ async function sendCaregiverAlert(alert) {
             const destination = alert.destination;
             const allowed = (process.env.SNS_ALLOWED_TOPIC_ARNS || '').split(',');
             if (!allowed.includes(topicArn)) return { sent: false, simulated: false, status: 'unconfigured' };
-            const subscriptions = await sendWithBudget(snsSdk().client, new (snsSdk().sdk.ListSubscriptionsByTopicCommand)({ TopicArn: topicArn }));
+            const { client, sdk } = snsSdk();
+            const subscriptions = await sendWithBudget(client, new sdk.ListSubscriptionsByTopicCommand({ TopicArn: topicArn }));
             const only = subscriptions.Subscriptions?.[0];
             if (subscriptions.NextToken || subscriptions.Subscriptions?.length !== 1
                 || only.SubscriptionArn !== destination.subscriptionArn || only.Endpoint !== destination.endpoint
@@ -52,7 +57,8 @@ async function sendCaregiverAlert(alert) {
                 return { sent: false, simulated: false, status: 'failed' };
             }
         }
-        const result = await sendWithBudget(snsSdk().client, new (snsSdk().sdk.PublishCommand)({
+        const { client, sdk } = snsSdk();
+        const result = await sendWithBudget(client, new sdk.PublishCommand({
             TopicArn: topicArn,
             Subject: formatted.subject.slice(0, 100),
             Message: formatted.message,

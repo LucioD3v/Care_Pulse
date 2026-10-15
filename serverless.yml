@@ -371,7 +371,7 @@ resources:
     McpLatencyAlarm:
       Type: AWS::CloudWatch::Alarm
       Properties:
-        AlarmDescription: MCP p95 handler time is near the Alexa+ 500 ms round-trip limit.
+        AlarmDescription: MCP p95 handler time (excluding cold-start initialization) is near the Alexa+ 500 ms limit in 2 of 3 periods.
         Namespace: CarePulse
         MetricName: RequestDuration
         Dimensions:
@@ -381,8 +381,29 @@ resources:
             Value: ${sls:stage}
         ExtendedStatistic: p95
         Period: 300
-        EvaluationPeriods: 1
+        EvaluationPeriods: 3
+        DatapointsToAlarm: 2
         Threshold: 400
+        ComparisonOperator: GreaterThanOrEqualToThreshold
+        TreatMissingData: notBreaching
+        AlarmActions:
+          Fn::If: [HasAlarmTopic, [{ Ref: OperationsAlarmTopicArn }], { Ref: 'AWS::NoValue' }]
+    McpEndToEndLatencyAlarm:
+      Type: AWS::CloudWatch::Alarm
+      Properties:
+        AlarmDescription: API Gateway p95 latency, which includes Lambda cold starts, reached the Alexa+ 500 ms limit in 2 of 3 periods.
+        Namespace: AWS/ApiGateway
+        MetricName: Latency
+        Dimensions:
+          - Name: ApiId
+            Value: { Ref: HttpApi }
+          - Name: Stage
+            Value: $default
+        ExtendedStatistic: p95
+        Period: 300
+        EvaluationPeriods: 3
+        DatapointsToAlarm: 2
+        Threshold: 500
         ComparisonOperator: GreaterThanOrEqualToThreshold
         TreatMissingData: notBreaching
         AlarmActions:

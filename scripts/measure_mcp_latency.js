@@ -24,6 +24,15 @@ Authentication comes from the environment only:
   CAREPULSE_MCP_KEY    Shared demo key (sent as x-carepulse-mcp-key)`;
 
 const PROTOCOL_VERSION = '2025-11-25';
+const METHODS = ['ping', 'tools/list', 'get_care_context'];
+
+function report(results, log) {
+    log(`First request (initialize, includes any cold start): ${results.first} ms`);
+    for (const name of METHODS.filter(method => results[method])) {
+        const { count, p50, p95, max } = results[name];
+        log(`${name.padEnd(17)} n=${count}  p50 ${Math.round(p50)} ms  p95 ${Math.round(p95)} ms  max ${Math.round(max)} ms`);
+    }
+}
 
 function parseArgs(argv, env = process.env) {
     const options = {
@@ -95,7 +104,9 @@ class Client {
 
     async close() {
         if (!this.sessionId) return;
-        await fetch(this.url, { method: 'DELETE', headers: { ...this.auth, 'mcp-session-id': this.sessionId } }).catch(() => {});
+        await fetch(this.url, {
+            method: 'DELETE', headers: { ...this.auth, 'mcp-session-id': this.sessionId }, signal: AbortSignal.timeout(10000)
+        }).catch(() => {});
     }
 }
 
@@ -122,23 +133,29 @@ async function run(options, log = console.log) {
         };
         for (const [name, call] of Object.entries(methods)) {
             const samples = [];
-            for (let index = 0; index < options.requests; index++) {
-                const { elapsed, body } = await call();
-                if (body?.result?.isError) throw new Error(`${name} returned a tool error: ${body.result.content?.[0]?.text || 'unknown'}`);
-                samples.push(elapsed);
+            try {
+                for (let index = 0; index < options.requests; index++) {
+                    const { elapsed, body } = await call();
+                    if (body?.result?.isError) throw new Error(`${name} returned a tool error: ${body.result.content?.[0]?.text || 'unknown'}`);
+                    samples.push(elapsed);
+                }
+            } finally {
+                if (samples.length) results[name] = summarize(samples);
             }
-            results[name] = summarize(samples);
         }
+    } catch (error) {
+        // Show what was measured before the failure so the run is not wasted.
+        if (results.first !== undefined) {
+            log('Run stopped early; partial results:');
+            report(results, log);
+        }
+        throw error;
     } finally {
         await client.close();
     }
 
-    const worstP95 = Math.max(...['ping', 'tools/list', 'get_care_context'].map(name => results[name].p95));
-    log(`First request (initialize, includes any cold start): ${results.first} ms`);
-    for (const name of ['ping', 'tools/list', 'get_care_context']) {
-        const { count, p50, p95, max } = results[name];
-        log(`${name.padEnd(17)} n=${count}  p50 ${Math.round(p50)} ms  p95 ${Math.round(p95)} ms  max ${Math.round(max)} ms`);
-    }
+    const worstP95 = Math.max(...METHODS.map(name => results[name].p95));
+    report(results, log);
     // The first request carries any cold start, which is what Alexa+ would see on a cold function.
     const failures = [];
     if (!(results.first < options.limitMs)) failures.push(`first request ${results.first} ms`);

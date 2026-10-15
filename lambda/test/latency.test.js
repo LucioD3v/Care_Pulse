@@ -95,4 +95,57 @@ test('Serverless sizes the MCP function and alarms near the Alexa+ latency limit
     assert.deepEqual(alarm.Dimensions[0], { Name: 'Service', Value: 'mcp' });
     assert.equal(alarm.ExtendedStatistic, 'p95');
     assert.ok(alarm.Threshold < 500);
+    assert.equal(alarm.EvaluationPeriods, 3);
+    assert.equal(alarm.DatapointsToAlarm, 2, 'one slow request in a quiet window must not alarm');
+    // Handler time cannot see cold starts; API Gateway latency can.
+    const endToEnd = config.resources.Resources.McpEndToEndLatencyAlarm.Properties;
+    assert.equal(endToEnd.Namespace, 'AWS/ApiGateway');
+    assert.equal(endToEnd.MetricName, 'Latency');
+    assert.deepEqual(endToEnd.Dimensions[0], { Name: 'ApiId', Value: { Ref: 'HttpApi' } });
+    assert.equal(endToEnd.Threshold, 500);
+    assert.equal(endToEnd.DatapointsToAlarm, 2);
+});
+
+test('OAuth routes report metrics as mcp-oauth so MCP latency only covers MCP calls', async t => {
+    const lines = [];
+    t.mock.method(console, 'info', line => lines.push(String(line)));
+    await handler({ rawPath: '/.well-known/oauth-protected-resource', headers: { host: 'h.example' },
+        requestContext: { domainName: 'h.example', http: { method: 'GET', path: '/.well-known/oauth-protected-resource' } } }, {});
+    const services = lines.filter(line => line.includes('RequestDuration')).map(line => JSON.parse(line).Service);
+    assert.deepEqual(services, ['mcp-oauth']);
+});
+
+test('a failure mid-run still prints the results measured so far', async t => {
+    let calls = 0;
+    const server = http.createServer(async (request, response) => {
+        let body = '';
+        for await (const chunk of request) body += chunk;
+        if (body.includes('"method":"tools/list"') && ++calls > 1) {
+            response.writeHead(502);
+            return response.end();
+        }
+        const result = await handler({ headers: request.headers, requestContext: { http: { method: request.method } }, body }, {});
+        response.writeHead(result.statusCode, result.headers || {});
+        response.end(result.body || '');
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    t.after(() => server.close());
+    const lines = [];
+    await assert.rejects(latency.run({ mcpUrl: `http://127.0.0.1:${server.address().port}/mcp`, key: 'latency-key', requests: 3,
+        member: 'Elena', limitMs: 5000 }, line => lines.push(line)), /HTTP 502/);
+    const output = lines.join('\n');
+    assert.match(output, /partial results/);
+    assert.match(output, /ping +n=3/);
+    assert.match(output, /tools\/list +n=1/);
+});
+
+test('SNS is preloaded only in provisioned-concurrency environments', () => {
+    const probe = initType => execFileSync(process.execPath, ['-e', `
+        const Module = require('module'); const load = Module._load; let loaded = false;
+        Module._load = function (request) { if (request === '@aws-sdk/client-sns') loaded = true; return load.apply(this, arguments); };
+        require(${JSON.stringify(path.join(__dirname, '..', 'sns_notifier'))});
+        process.stdout.write(String(loaded));
+    `], { encoding: 'utf8', env: { ...process.env, CARE_MODE: 'demo', AWS_LAMBDA_INITIALIZATION_TYPE: initType } });
+    assert.equal(probe('provisioned-concurrency'), 'true');
+    assert.equal(probe('on-demand'), 'false');
 });
