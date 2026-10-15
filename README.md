@@ -105,7 +105,7 @@ Alexa+ requires MCP round trips under 500 ms. The MCP Lambda defaults to 1024 MB
 CAREPULSE_MCP_KEY=<key> node scripts/measure_mcp_latency.js --mcp-url <McpEndpoint>
 ```
 
-It reports p50/p95/max for `ping`, `tools/list`, and `get_care_context`, and exits with an error if the worst p95 is not under 500 ms. Use `CAREPULSE_MCP_TOKEN` instead of the key to measure the OAuth path.
+It reports the first request (which includes any cold start) and p50/p95/max for `ping`, `tools/list`, and `get_care_context`, and exits with an error if the first request or the worst p95 is not under 500 ms. It opens an MCP session (a stored record), and in demo mode `get_care_context` creates a default context for a member that does not exist, so measure with an existing member. Use `CAREPULSE_MCP_TOKEN` instead of the key to measure the OAuth path.
 
 ### Tools Currently Returned by `tools/list`
 

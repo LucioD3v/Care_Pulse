@@ -2,15 +2,22 @@
 'use strict';
 
 // Measures client-side MCP round trips against a deployed CarePulse gateway and checks them
-// against the Alexa+ limit (< 500 ms). Read-only: it calls ping, tools/list and get_care_context.
+// against the Alexa+ limit (< 500 ms). It calls ping, tools/list and get_care_context. It is not
+// strictly read-only: opening the MCP session writes a session record, and in demo mode
+// get_care_context creates a default context if the member does not exist yet.
 
 const HELP = `Usage: node scripts/measure_mcp_latency.js --mcp-url <endpoint>/mcp [options]
 
 Options:
   --requests <n>     Measured calls per method (default 20)
   --member <name>    Member for get_care_context (default Elena)
-  --limit-ms <n>     Pass/fail threshold for p95 (default 500, the Alexa+ limit)
+  --limit-ms <n>     Pass/fail threshold (default 500, the Alexa+ limit). The run fails if the
+                     first request (initialize, which includes any cold start) or the worst p95
+                     is not under it.
   --help             Show this help
+
+Writes: opening the MCP session stores a session record. In demo mode, get_care_context
+creates a default context when the member does not exist, so use an existing member.
 
 Authentication comes from the environment only:
   CAREPULSE_MCP_TOKEN  OAuth access token (sent as Authorization: Bearer)
@@ -132,9 +139,14 @@ async function run(options, log = console.log) {
         const { count, p50, p95, max } = results[name];
         log(`${name.padEnd(17)} n=${count}  p50 ${Math.round(p50)} ms  p95 ${Math.round(p95)} ms  max ${Math.round(max)} ms`);
     }
-    const passed = worstP95 < options.limitMs;
-    log(passed ? `PASS: worst p95 ${Math.round(worstP95)} ms is under ${options.limitMs} ms.`
-        : `FAIL: worst p95 ${Math.round(worstP95)} ms is not under ${options.limitMs} ms.`);
+    // The first request carries any cold start, which is what Alexa+ would see on a cold function.
+    const failures = [];
+    if (!(results.first < options.limitMs)) failures.push(`first request ${results.first} ms`);
+    if (!(worstP95 < options.limitMs)) failures.push(`worst p95 ${Math.round(worstP95)} ms`);
+    const passed = failures.length === 0;
+    log(passed ? `PASS: first request ${results.first} ms and worst p95 ${Math.round(worstP95)} ms are under ${options.limitMs} ms.`
+        : `FAIL: ${failures.join(' and ')} not under ${options.limitMs} ms.${results.first >= options.limitMs
+            ? ' If only the first request is slow, enable provisioned concurrency (mcpProvisionedConcurrency=1).' : ''}`);
     return { ...results, worstP95, passed };
 }
 

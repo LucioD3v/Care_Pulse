@@ -17,11 +17,12 @@ beforeEach(() => {
     resetMockRecords();
 });
 
-async function startGateway(t, delayMs = 0) {
+async function startGateway(t, delayMs = 0, { onlyInitialize = false } = {}) {
     const server = http.createServer(async (request, response) => {
         let body = '';
         for await (const chunk of request) body += chunk;
-        if (delayMs) await new Promise(resolve => setTimeout(resolve, delayMs));
+        const slow = delayMs && (!onlyInitialize || body.includes('"method":"initialize"'));
+        if (slow) await new Promise(resolve => setTimeout(resolve, delayMs));
         const result = await handler({ headers: request.headers, requestContext: { http: { method: request.method } }, body }, {});
         response.writeHead(result.statusCode, result.headers || {});
         response.end(result.body || '');
@@ -50,7 +51,17 @@ test('measures a live MCP session end to end and passes under the limit', async 
     const result = await latency.run({ mcpUrl, key: 'latency-key', requests: 3, member: 'Elena', limitMs: 5000 }, line => lines.push(line));
     assert.equal(result.passed, true);
     for (const name of ['ping', 'tools/list', 'get_care_context']) assert.equal(result[name].count, 3);
-    assert.match(lines.join('\n'), /PASS: worst p95/);
+    assert.match(lines.join('\n'), /PASS: first request \d+ ms and worst p95/);
+});
+
+test('a slow first request (cold start) fails the run even when later calls are fast', async t => {
+    const mcpUrl = await startGateway(t, 400, { onlyInitialize: true });
+    const lines = [];
+    const result = await latency.run({ mcpUrl, key: 'latency-key', requests: 3, member: 'Elena', limitMs: 300 }, line => lines.push(line));
+    assert.ok(result.worstP95 < 300, 'warm calls are under the limit');
+    assert.ok(result.first >= 300, 'the initialize round trip is slow');
+    assert.equal(result.passed, false);
+    assert.match(lines.join('\n'), /FAIL: first request \d+ ms not under 300 ms\. If only the first request is slow, enable provisioned concurrency/);
 });
 
 test('reports FAIL when round trips exceed the limit', async t => {
