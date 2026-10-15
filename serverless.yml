@@ -13,6 +13,10 @@ provider:
   logRetentionInDays: 14
   deploymentMethod: direct
   versionFunctions: false
+  httpApi:
+    # Route-level metrics (ApiId, Method, Resource, Stage) let McpEndToEndLatencyAlarm watch only
+    # POST /mcp. Detailed metrics add a small CloudWatch charge.
+    metrics: true
   environment:
     CARE_TABLE_NAME:
       Ref: CarePulseTable
@@ -64,6 +68,11 @@ functions:
     description: CarePulse MCP 2025-11-25 JSON Streamable HTTP gateway
     handler: lambda/mcp_http.handler
     role: { Fn::GetAtt: [McpRole, Arn] }
+    # Alexa+ requires MCP round trips under 500 ms. Lambda CPU scales with memory, and provisioned
+    # concurrency keeps initialized environments ready so cold starts stay off the request path.
+    # Provisioned concurrency is billed while enabled; set it to 1 for demos and judging, 0 otherwise.
+    memorySize: ${param:mcpMemorySize, env:MCP_MEMORY_SIZE, 1024}
+    provisionedConcurrency: ${param:mcpProvisionedConcurrency, env:MCP_PROVISIONED_CONCURRENCY, 0}
     environment:
       MCP_API_KEY: ${param:mcpApiKey, env:MCP_API_KEY, env:CAREPULSE_MCP_KEY}
       MCP_ALLOWED_ORIGINS: ${param:mcpAllowedOrigins, env:MCP_ALLOWED_ORIGINS, ''}
@@ -363,6 +372,50 @@ resources:
         TreatMissingData: notBreaching
         AlarmActions:
           Fn::If: [HasAlarmTopic, [{ Ref: OperationsAlarmTopicArn }], { Ref: 'AWS::NoValue' }]
+    McpLatencyAlarm:
+      Type: AWS::CloudWatch::Alarm
+      Properties:
+        AlarmDescription: MCP p95 handler time (excluding cold-start initialization) is near the Alexa+ 500 ms limit in 2 of 3 periods.
+        Namespace: CarePulse
+        MetricName: RequestDuration
+        Dimensions:
+          - Name: Service
+            Value: mcp
+          - Name: Stage
+            Value: ${sls:stage}
+        ExtendedStatistic: p95
+        Period: 300
+        EvaluationPeriods: 3
+        DatapointsToAlarm: 2
+        Threshold: 400
+        ComparisonOperator: GreaterThanOrEqualToThreshold
+        TreatMissingData: notBreaching
+        AlarmActions:
+          Fn::If: [HasAlarmTopic, [{ Ref: OperationsAlarmTopicArn }], { Ref: 'AWS::NoValue' }]
+    McpEndToEndLatencyAlarm:
+      Type: AWS::CloudWatch::Alarm
+      Properties:
+        AlarmDescription: API Gateway p95 latency for POST /mcp, which includes Lambda cold starts, reached the Alexa+ 500 ms limit in 2 of 3 periods.
+        Namespace: AWS/ApiGateway
+        MetricName: Latency
+        Dimensions:
+          - Name: ApiId
+            Value: { Ref: HttpApi }
+          - Name: Method
+            Value: POST
+          - Name: Resource
+            Value: /mcp
+          - Name: Stage
+            Value: $default
+        ExtendedStatistic: p95
+        Period: 300
+        EvaluationPeriods: 3
+        DatapointsToAlarm: 2
+        Threshold: 500
+        ComparisonOperator: GreaterThanOrEqualToThreshold
+        TreatMissingData: notBreaching
+        AlarmActions:
+          Fn::If: [HasAlarmTopic, [{ Ref: OperationsAlarmTopicArn }], { Ref: 'AWS::NoValue' }]
     AlexaNotificationAlarm:
       Type: AWS::CloudWatch::Alarm
       Properties:
@@ -425,6 +478,25 @@ resources:
         Dimensions:
           - Name: Service
             Value: mcp
+          - Name: Stage
+            Value: ${sls:stage}
+        Statistic: Sum
+        Period: 60
+        EvaluationPeriods: 1
+        Threshold: 1
+        ComparisonOperator: GreaterThanOrEqualToThreshold
+        TreatMissingData: notBreaching
+        AlarmActions:
+          Fn::If: [HasAlarmTopic, [{ Ref: OperationsAlarmTopicArn }], { Ref: 'AWS::NoValue' }]
+    McpOAuthErrorsAlarm:
+      Type: AWS::CloudWatch::Alarm
+      Properties:
+        AlarmDescription: OAuth discovery or Cognito forwarding (Service=mcp-oauth) returned a server error.
+        Namespace: CarePulse
+        MetricName: ServiceErrors
+        Dimensions:
+          - Name: Service
+            Value: mcp-oauth
           - Name: Stage
             Value: ${sls:stage}
         Statistic: Sum
