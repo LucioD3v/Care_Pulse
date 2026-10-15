@@ -13,6 +13,10 @@ provider:
   logRetentionInDays: 14
   deploymentMethod: direct
   versionFunctions: false
+  httpApi:
+    # Route-level metrics (ApiId, Method, Resource, Stage) let McpEndToEndLatencyAlarm watch only
+    # POST /mcp. Detailed metrics add a small CloudWatch charge.
+    metrics: true
   environment:
     CARE_TABLE_NAME:
       Ref: CarePulseTable
@@ -391,12 +395,16 @@ resources:
     McpEndToEndLatencyAlarm:
       Type: AWS::CloudWatch::Alarm
       Properties:
-        AlarmDescription: API Gateway p95 latency, which includes Lambda cold starts, reached the Alexa+ 500 ms limit in 2 of 3 periods.
+        AlarmDescription: API Gateway p95 latency for POST /mcp, which includes Lambda cold starts, reached the Alexa+ 500 ms limit in 2 of 3 periods.
         Namespace: AWS/ApiGateway
         MetricName: Latency
         Dimensions:
           - Name: ApiId
             Value: { Ref: HttpApi }
+          - Name: Method
+            Value: POST
+          - Name: Resource
+            Value: /mcp
           - Name: Stage
             Value: $default
         ExtendedStatistic: p95
@@ -470,6 +478,25 @@ resources:
         Dimensions:
           - Name: Service
             Value: mcp
+          - Name: Stage
+            Value: ${sls:stage}
+        Statistic: Sum
+        Period: 60
+        EvaluationPeriods: 1
+        Threshold: 1
+        ComparisonOperator: GreaterThanOrEqualToThreshold
+        TreatMissingData: notBreaching
+        AlarmActions:
+          Fn::If: [HasAlarmTopic, [{ Ref: OperationsAlarmTopicArn }], { Ref: 'AWS::NoValue' }]
+    McpOAuthErrorsAlarm:
+      Type: AWS::CloudWatch::Alarm
+      Properties:
+        AlarmDescription: OAuth discovery or Cognito forwarding (Service=mcp-oauth) returned a server error.
+        Namespace: CarePulse
+        MetricName: ServiceErrors
+        Dimensions:
+          - Name: Service
+            Value: mcp-oauth
           - Name: Stage
             Value: ${sls:stage}
         Statistic: Sum

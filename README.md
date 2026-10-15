@@ -99,7 +99,7 @@ The following six names describe the original target tool contract. The reposito
 
 ### Latency (Alexa+ limit: 500 ms)
 
-Alexa+ requires MCP round trips under 500 ms. The MCP Lambda defaults to 1024 MB, loads the SNS SDK only when a notification is sent, and supports provisioned concurrency (`mcpProvisionedConcurrency=1`, billed while on) to keep cold starts off the request path. `McpLatencyAlarm` fires when p95 handler time reaches 400 ms. Measure a deployment with:
+Alexa+ requires MCP round trips under 500 ms. The MCP Lambda defaults to 1024 MB, loads the SNS SDK only when a notification is sent, and supports provisioned concurrency (`mcpProvisionedConcurrency=1`, billed while on) to keep cold starts off the request path. `McpLatencyAlarm` fires when p95 handler time reaches 400 ms in 2 of 3 periods, and `McpEndToEndLatencyAlarm` watches API Gateway p95 latency for `POST /mcp` (which includes cold starts) against 500 ms; route-level metrics are enabled for this and add a small CloudWatch charge. OAuth routes report as `mcp-oauth` and have their own `McpOAuthErrorsAlarm`. Measure a deployment with:
 
 ```
 CAREPULSE_MCP_KEY=<key> node scripts/measure_mcp_latency.js --mcp-url <McpEndpoint>

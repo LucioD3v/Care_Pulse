@@ -25,12 +25,21 @@ Authentication comes from the environment only:
 
 const PROTOCOL_VERSION = '2025-11-25';
 const METHODS = ['ping', 'tools/list', 'get_care_context'];
+const fmt = ms => `${Math.round(ms * 10) / 10} ms`;
+
+// Compares unrounded times: 499.6 ms is under a 500 ms limit.
+function evaluate({ first, worstP95 }, limitMs) {
+    const failures = [];
+    if (!(first < limitMs)) failures.push(`first request ${fmt(first)}`);
+    if (!(worstP95 < limitMs)) failures.push(`worst p95 ${fmt(worstP95)}`);
+    return { passed: failures.length === 0, failures };
+}
 
 function report(results, log) {
-    log(`First request (initialize, includes any cold start): ${results.first} ms`);
+    log(`First request (initialize, includes any cold start): ${fmt(results.first)}`);
     for (const name of METHODS.filter(method => results[method])) {
         const { count, p50, p95, max } = results[name];
-        log(`${name.padEnd(17)} n=${count}  p50 ${Math.round(p50)} ms  p95 ${Math.round(p95)} ms  max ${Math.round(max)} ms`);
+        log(`${name.padEnd(17)} n=${count}  p50 ${fmt(p50)}  p95 ${fmt(p95)}  max ${fmt(max)}`);
     }
 }
 
@@ -123,7 +132,7 @@ async function run(options, log = console.log) {
         });
         client.sessionId = init.response.headers.get('mcp-session-id');
         if (!client.sessionId) throw new Error('CarePulse did not return an MCP session.');
-        results.first = Math.round(init.elapsed);
+        results.first = init.elapsed;
         await client.post('notifications/initialized', undefined, { notification: true });
 
         const methods = {
@@ -157,17 +166,14 @@ async function run(options, log = console.log) {
     const worstP95 = Math.max(...METHODS.map(name => results[name].p95));
     report(results, log);
     // The first request carries any cold start, which is what Alexa+ would see on a cold function.
-    const failures = [];
-    if (!(results.first < options.limitMs)) failures.push(`first request ${results.first} ms`);
-    if (!(worstP95 < options.limitMs)) failures.push(`worst p95 ${Math.round(worstP95)} ms`);
-    const passed = failures.length === 0;
-    log(passed ? `PASS: first request ${results.first} ms and worst p95 ${Math.round(worstP95)} ms are under ${options.limitMs} ms.`
+    const { passed, failures } = evaluate({ first: results.first, worstP95 }, options.limitMs);
+    log(passed ? `PASS: first request ${fmt(results.first)} and worst p95 ${fmt(worstP95)} are under ${options.limitMs} ms.`
         : `FAIL: ${failures.join(' and ')} not under ${options.limitMs} ms.${results.first >= options.limitMs
             ? ' If only the first request is slow, enable provisioned concurrency (mcpProvisionedConcurrency=1).' : ''}`);
     return { ...results, worstP95, passed };
 }
 
-module.exports = { parseArgs, summarize, run };
+module.exports = { parseArgs, summarize, evaluate, run };
 
 if (require.main === module) {
     let options;

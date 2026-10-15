@@ -51,7 +51,7 @@ test('measures a live MCP session end to end and passes under the limit', async 
     const result = await latency.run({ mcpUrl, key: 'latency-key', requests: 3, member: 'Elena', limitMs: 5000 }, line => lines.push(line));
     assert.equal(result.passed, true);
     for (const name of ['ping', 'tools/list', 'get_care_context']) assert.equal(result[name].count, 3);
-    assert.match(lines.join('\n'), /PASS: first request \d+ ms and worst p95/);
+    assert.match(lines.join('\n'), /PASS: first request [\d.]+ ms and worst p95/);
 });
 
 test('a slow first request (cold start) fails the run even when later calls are fast', async t => {
@@ -61,7 +61,7 @@ test('a slow first request (cold start) fails the run even when later calls are 
     assert.ok(result.worstP95 < 300, 'warm calls are under the limit');
     assert.ok(result.first >= 300, 'the initialize round trip is slow');
     assert.equal(result.passed, false);
-    assert.match(lines.join('\n'), /FAIL: first request \d+ ms not under 300 ms\. If only the first request is slow, enable provisioned concurrency/);
+    assert.match(lines.join('\n'), /FAIL: first request [\d.]+ ms not under 300 ms\. If only the first request is slow, enable provisioned concurrency/);
 });
 
 test('reports FAIL when round trips exceed the limit', async t => {
@@ -104,6 +104,21 @@ test('Serverless sizes the MCP function and alarms near the Alexa+ latency limit
     assert.deepEqual(endToEnd.Dimensions[0], { Name: 'ApiId', Value: { Ref: 'HttpApi' } });
     assert.equal(endToEnd.Threshold, 500);
     assert.equal(endToEnd.DatapointsToAlarm, 2);
+    // Scoped to POST /mcp so OAuth and discovery routes neither trigger nor dilute it.
+    assert.deepEqual(endToEnd.Dimensions.map(d => d.Name), ['ApiId', 'Method', 'Resource', 'Stage']);
+    assert.equal(endToEnd.Dimensions.find(d => d.Name === 'Method').Value, 'POST');
+    assert.equal(endToEnd.Dimensions.find(d => d.Name === 'Resource').Value, '/mcp');
+    assert.equal(config.provider.httpApi.metrics, true, 'route metrics are only sent when detailed metrics are on');
+    const oauthErrors = config.resources.Resources.McpOAuthErrorsAlarm.Properties;
+    assert.equal(oauthErrors.MetricName, 'ServiceErrors');
+    assert.deepEqual(oauthErrors.Dimensions[0], { Name: 'Service', Value: 'mcp-oauth' });
+});
+
+test('limits compare unrounded times, so 499.6 ms passes a 500 ms limit', () => {
+    assert.equal(latency.evaluate({ first: 499.6, worstP95: 120 }, 500).passed, true);
+    assert.equal(latency.evaluate({ first: 500, worstP95: 120 }, 500).passed, false);
+    assert.equal(latency.evaluate({ first: 120, worstP95: 499.9 }, 500).passed, true);
+    assert.deepEqual(latency.evaluate({ first: 501.24, worstP95: 600 }, 500).failures, ['first request 501.2 ms', 'worst p95 600 ms']);
 });
 
 test('OAuth routes report metrics as mcp-oauth so MCP latency only covers MCP calls', async t => {
