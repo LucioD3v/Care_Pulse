@@ -1,6 +1,7 @@
 service: carepulse-mvp
 frameworkVersion: '4'
 configValidationMode: error
+useDotenv: true
 
 provider:
   name: aws
@@ -24,6 +25,32 @@ provider:
     DEFAULT_BASELINE_SLEEP_HOURS: ${param:baselineSleepHours, env:DEFAULT_BASELINE_SLEEP_HOURS, ''}
     DEFAULT_TIME_ZONE: ${param:timeZone, env:DEFAULT_TIME_ZONE, 'America/Mexico_City'}
     DEMO_OWNER_ID: ${param:demoOwnerId, env:DEMO_OWNER_ID, ''}
+    SNS_TOPIC_ARN:
+      Ref: CaregiverAlertsTopic
+    BEDROCK_MODEL_ID: ${env:CAREPULSE_BEDROCK_MODEL_ID}
+    REQUIRE_BEDROCK: 'true'
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:Query
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+          Resource:
+            - Fn::GetAtt: [CarePulseTable, Arn]
+        - Effect: Allow
+          Action:
+            - sns:Publish
+          Resource:
+            Ref: CaregiverAlertsTopic
+        - Effect: Allow
+          Action:
+            - bedrock:InvokeModel
+            - bedrock:InvokeModelWithResponseStream
+          Resource: '*'
   tags:
     Project: CarePulse
     Component: AlexaMVP
@@ -32,9 +59,14 @@ provider:
     ManagedBy: ServerlessFramework
 
 package:
-  individually: true
+  individually: false
   patterns:
     - '!**'
+    - lambda/**
+    - '!lambda/test/**'
+    - '!lambda/seed_demo.js'
+    - '!lambda/backfill_followup_index.js'
+    - '!**/.env*'
 
 functions:
   alexaSkill:
@@ -43,20 +75,17 @@ functions:
     handler: lambda/index.handler
     role: { Fn::GetAtt: [AlexaRole, Arn] }
     environment:
-      ALEXA_SKILL_ID: ${param:alexaSkillId, env:ALEXA_SKILL_ID}
+      CAREPULSE_ALEXA_SKILL_ID: ${param:alexaSkillId, env:CAREPULSE_ALEXA_SKILL_ID}
+      CAREPULSE_COVER_IMAGE_URL: ${param:coverImageUrl, env:CAREPULSE_COVER_IMAGE_URL, ''}
+      CAREPULSE_CARD_SMALL_IMAGE_URL: ${param:cardSmallImageUrl, env:CAREPULSE_CARD_SMALL_IMAGE_URL, ''}
+      CAREPULSE_CARD_LARGE_IMAGE_URL: ${param:cardLargeImageUrl, env:CAREPULSE_CARD_LARGE_IMAGE_URL, ''}
+      CAREPULSE_WELLNESS_BACKGROUND_URL: ${param:wellnessBackgroundUrl, env:CAREPULSE_WELLNESS_BACKGROUND_URL, ''}
       SNS_TOPIC_ARN: { Ref: CaregiverAlertsTopic }
-      BEDROCK_MODEL_ID: ${param:bedrockModelId, env:BEDROCK_MODEL_ID, ''}
+      BEDROCK_MODEL_ID: ${param:bedrockModelId, env:CAREPULSE_BEDROCK_MODEL_ID, ''}
       VOICE_TIMEOUT_MS: ${param:voiceTimeoutMs, env:VOICE_TIMEOUT_MS, '1200'}
-    package:
-      patterns:
-        - lambda/**
-        - '!lambda/test/**'
-        - '!lambda/seed_demo.js'
-        - '!lambda/backfill_followup_index.js'
-        - '!**/.env*'
     events:
       - alexaSkill:
-          appId: ${param:alexaSkillId, env:ALEXA_SKILL_ID}
+          appId: ${param:alexaSkillId, env:CAREPULSE_ALEXA_SKILL_ID}
           enabled: true
 
   mcpGateway:
@@ -78,13 +107,6 @@ functions:
       OAUTH_ISSUER_URL: ${param:oauthIssuerUrl, env:OAUTH_ISSUER_URL, ''}
       # Demo mode: the only Cognito "sub" allowed to act for DEMO_OWNER_ID. Empty disables token access.
       DEMO_TOKEN_SUBJECT: ${param:demoTokenSubject, env:DEMO_TOKEN_SUBJECT, ''}
-    package:
-      patterns:
-        - lambda/**
-        - '!lambda/test/**'
-        - '!lambda/seed_demo.js'
-        - '!lambda/backfill_followup_index.js'
-        - '!**/.env*'
     events:
       - httpApi:
           path: /mcp
@@ -116,13 +138,6 @@ functions:
     handler: lambda/followup_monitor.handler
     role: { Fn::GetAtt: [MonitorRole, Arn] }
     timeout: 60
-    package:
-      patterns:
-        - lambda/**
-        - '!lambda/test/**'
-        - '!lambda/seed_demo.js'
-        - '!lambda/backfill_followup_index.js'
-        - '!**/.env*'
     events:
       - schedule: rate(5 minutes)
 

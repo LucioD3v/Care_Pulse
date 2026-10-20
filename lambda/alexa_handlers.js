@@ -28,6 +28,7 @@ const { metric } = require('./observability');
 const { currentPrincipal, defaultMember, AccessError } = require('./access_control');
 const { isDemo } = require('./runtime_config');
 const { SIGNALS, STATES: REPORT_STATES, normalize } = require('./care_validation');
+const { addWelcomePresentation } = require('./welcome_presentation');
 
 const STATES = {
     AWAITING_FOLLOWUP_CONFIRMATION: 'AWAITING_FOLLOWUP_CONFIRMATION',
@@ -201,10 +202,10 @@ const LaunchRequestHandler = {
             });
             const prompt = COPY.dueFollowup(memberName);
             speakText(handlerInput, prompt);
-            return repromptText(handlerInput, prompt).getResponse();
+            return addWelcomePresentation(handlerInput, repromptText(handlerInput, prompt)).getResponse();
         }
         speakText(handlerInput, COPY.welcome);
-        return repromptText(handlerInput, COPY.welcome).getResponse();
+        return addWelcomePresentation(handlerInput, repromptText(handlerInput, COPY.welcome)).getResponse();
     }
 };
 
@@ -815,7 +816,7 @@ const skill = Alexa.SkillBuilders.custom()
     )
     .addErrorHandlers(CatchAllExceptionHandler);
 
-if (process.env.ALEXA_SKILL_ID) skill.withSkillId(process.env.ALEXA_SKILL_ID);
+if (process.env.CAREPULSE_ALEXA_SKILL_ID) skill.withSkillId(process.env.CAREPULSE_ALEXA_SKILL_ID);
 exports.handler = skill.lambda();
 
 exports._private = { ownerId, localDateTime, followupSchedule, STATES };

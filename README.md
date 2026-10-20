@@ -315,41 +315,18 @@ The complete reference, including accepted values, defaults, required settings, 
 | :--- | :--- |
 | `AWS_REGION` | Fallback for Serverless `--region`; defaults to `us-east-1`. AWS SDK clients use the deployed Lambda region. |
 | `CARE_TABLE_NAME` | Set from the `CarePulseTable` CloudFormation resource. The code does not use `DYNAMODB_TABLE_NAME`. |
-| `BEDROCK_MODEL_ID` | Optional `bedrockModelId`; uses deterministic wording when absent or unavailable. |
-| `BEDROCK_RESOURCE_ARNS` | Fallback for `bedrockResourceArns`: exact comma-separated model/profile ARNs allowed for the Alexa role; supply when enabling Bedrock. |
-| `OPERATIONS_ALARM_TOPIC_ARN` | Fallback for `operationsAlarmTopicArn`: optional operations SNS topic for CloudWatch alarm actions. |
-| `SNS_TOPIC_ARN` | Shared demo topic from `CaregiverAlertsTopic`. Subscribe only intended hackathon test recipients: SNS delivers to every subscriber. Production delivery requires a separate verified recipient registry and topic allowlist; the demo topic is not used as a production fallback. |
-| `MCP_API_KEY` | Demo gateway secret. Supply this variable, the `mcpApiKey` parameter, or `CAREPULSE_MCP_KEY`; a blank `MCP_API_KEY=` does not select the alias. |
-| `ALEXA_SKILL_ID` | Supply this variable or the required `alexaSkillId` parameter for the Alexa trigger and SDK validation. |
-| `MCP_ALLOWED_ORIGINS` | Optional comma-separated allowed browser origins; fallback for `mcpAllowedOrigins`. |
-| `VOICE_TIMEOUT_MS` | Optional model response timeout; fallback for `voiceTimeoutMs`, default `1200`. |
-| `DEFAULT_MEMBER_NAME`, `DEFAULT_CAREGIVER_NAME`, `DEFAULT_TIME_ZONE` | Fallbacks for `defaultMemberName`, `defaultCaregiverName`, and `timeZone`; retain Elena, Laura, and America/Mexico_City defaults. |
-| `DEFAULT_BASELINE_SLEEP_HOURS` | Fallback for `baselineSleepHours`; applies only to the explicitly configured demo owner. Empty by default; the previous `8.0` default is retained as a comment in the environment reference. |
-| `DEMO_OWNER_ID` | Optional synthetic household in explicit demo mode; also constrains MCP calls to that owner. Rejected outside demo mode. |
-| `CARE_MODE` | Supported template values: `demo` and `production`. Serverless defaults to `demo`; a direct runtime invocation without it follows the non-demo path. Demo mode is rejected when `STAGE` is `prod` or `production`. |
-| `CARE_STORAGE_MODE` | Optional local-only value `memory` permits demo storage without a table. AWS Lambda always requires `CARE_TABLE_NAME`; Serverless does not forward this variable. |
-| `WELLNESS_RETENTION_DAYS` | Integer 1–365 for new wellness events and request deduplication records; default 90 days. |
+| `CAREPULSE_ALEXA_SKILL_ID` | Required deployment variable containing the Alexa custom Skill ID. |
+| `CAREPULSE_BEDROCK_MODEL_ID` | Required deployment variable; copied to the Lambda `BEDROCK_MODEL_ID` environment variable. The model must support Converse in this region. |
+| `SNS_TOPIC_ARN` | Set from the `CaregiverAlertsTopic` resource. Subscribe and confirm caregiver endpoints separately. |
+| `CAREPULSE_MCP_KEY` | Required deployment secret; copied to the MCP Lambda `MCP_API_KEY` environment variable. |
+| `DEMO_OWNER_ID` | Optional shared demo owner for repeatable seed data; omit for per-Alexa-user hashed owner IDs. |
 
-The root `.env` and `.env.example` contain a deployment reference alongside the existing local settings. Keep existing local values when updating either file. For a new checkout, copy `.env.example` to `.env` only if `.env` does not already exist. Fill `ALEXA_SKILL_ID` and `MCP_API_KEY`; leave optional Bedrock values empty or configure both the model ID and exact resource ARNs.
-
-For separate environments, keep a complete configuration in `.env.dev`, `.env.qa`, or `.env.prod` and select it with `--stage dev`, `--stage qa`, or `--stage prod`. These files are ignored by Git; only `.env.example` is versioned. Serverless v4 loads dotenv files automatically, and the explicit `env:` fallbacks in this service expose only the selected settings to Lambda. See the [Serverless environment-variable documentation](https://www.serverless.com/framework/docs/guides/variables/env-vars).
-
-Deploy from the repository root after filling the selected environment file:
-
-```sh
-npx serverless@4 deploy --stage dev
-```
-
-Existing deployment parameters remain supported and take precedence over the new environment fallbacks. The example below uses shell variables for explicit overrides; dotenv loading inside Serverless does not expand a shell's `$CAREPULSE_MCP_KEY`. Export that shell variable first if using this form:
+Deploy from the repository root. Copy `.env.example` to `.env`, replace the three deployment placeholders, and do not commit `.env`. Serverless loads these values when resolving `serverless.yml`.
 
 ```sh
 npx serverless@4 deploy \
   --stage dev \
   --region us-east-1 \
-  --param="alexaSkillId=amzn1.ask.skill.REPLACE_ME" \
-  --param="mcpApiKey=$CAREPULSE_MCP_KEY" \
-  --param="bedrockModelId=YOUR_BEDROCK_MODEL_ID" \
-  --param="bedrockResourceArns=YOUR_EXACT_MODEL_OR_PROFILE_ARNS" \
   --param="demoOwnerId=hackathon-demo"
 ```
 

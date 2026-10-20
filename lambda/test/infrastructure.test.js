@@ -16,7 +16,7 @@ test('Serverless uses separate execution roles and scoped model resources', () =
     assert.doesNotMatch(JSON.stringify(resources.McpRole), /bedrock:/);
     assert.doesNotMatch(JSON.stringify(resources.MonitorRole), /sns:Publish|PutItem|DeleteItem/);
     assert.match(JSON.stringify(resources.AlexaRole), /BedrockInvokeResources/);
-    assert.ok(config.functions.alexaSkill.environment.ALEXA_SKILL_ID);
+    assert.ok(config.functions.alexaSkill.environment.CAREPULSE_ALEXA_SKILL_ID);
     assert.equal(resources.CaregiverAlertsTopic.Properties.KmsMasterKeyId.Ref, 'NotificationKey');
     assert.equal(resources.CarePulseTable.Properties.GlobalSecondaryIndexes[0].IndexName, 'PendingFollowups');
     assert.equal(resources.AlexaLatencyAlarm.Properties.ExtendedStatistic, 'p95');
@@ -25,13 +25,14 @@ test('Serverless uses separate execution roles and scoped model resources', () =
     assert.ok(config.functions.mcpGateway.events.some(event => event.httpApi?.method === 'GET'));
 });
 
-test('all Lambda packages exclude tests and migration utilities', () => {
+test('the shared Lambda package excludes tests and migration utilities', () => {
     const config = YAML.parse(source);
-    for (const fn of Object.values(config.functions)) {
-        assert.ok(fn.package.patterns.includes('!lambda/test/**'));
-        assert.ok(fn.package.patterns.includes('!lambda/backfill_followup_index.js'));
-        assert.ok(fn.package.patterns.includes('!**/.env*'));
-    }
+    assert.equal(config.package.individually, false);
+    assert.ok(config.package.patterns.includes('lambda/**'));
+    assert.ok(config.package.patterns.includes('!lambda/test/**'));
+    assert.ok(config.package.patterns.includes('!lambda/backfill_followup_index.js'));
+    assert.ok(config.package.patterns.includes('!**/.env*'));
+    for (const fn of Object.values(config.functions)) assert.equal(fn.package, undefined);
 });
 
 test('ASK CloudFormation YAML retains scoped logs, model access and encrypted notifications', () => {
@@ -45,7 +46,7 @@ test('ASK CloudFormation YAML retains scoped logs, model access and encrypted no
     const document = YAML.parseDocument(template, { customTags: [...scalar, ...sequence] });
     assert.deepEqual(document.errors, []);
     const config = document.toJS();
-    assert.ok(config.Resources.AlexaSkillFunction.Properties.Environment.Variables.ALEXA_SKILL_ID);
+    assert.ok(config.Resources.AlexaSkillFunction.Properties.Environment.Variables.CAREPULSE_ALEXA_SKILL_ID);
     assert.ok(config.Resources.AlexaSkillLogPolicy);
     assert.ok(config.Resources.NotificationKey);
     assert.equal(config.Resources.AlexaSkillFunction.Properties.Environment.Variables.CARE_TABLE_NAME.Ref, 'CarePulseTable');

@@ -9,7 +9,7 @@ exports.handler = function handler(event, context, callback) {
     const result = withRequest('alexa', context, 6500, async () => {
         try {
             const appId = event.context?.System?.application?.applicationId || event.session?.application?.applicationId;
-            if (process.env.ALEXA_SKILL_ID && appId !== process.env.ALEXA_SKILL_ID) throw new AccessError();
+            if (process.env.CAREPULSE_ALEXA_SKILL_ID && appId !== process.env.CAREPULSE_ALEXA_SKILL_ID) throw new AccessError();
             // Emergency guidance must remain available even before profile setup.
             const emergency = event.request?.intent?.name === 'EmergencyGuidanceIntent';
             const principal = emergency ? null : await fromAlexa(event);

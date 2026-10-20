@@ -10,6 +10,15 @@ const CARD_SLOT_BY_SIGNAL = { sleep: 'sleep', tiredness: 'energy', energy: 'ener
 const HIGH_STATES = new Set(['high', 'worse', 'severe', 'much-more-than-usual']);
 const MODERATE_STATES = new Set(['moderate', 'more-than-usual', 'same']);
 
+function httpsUrl(value) {
+    try {
+        const parsed = new URL(String(value || '').trim());
+        return parsed.protocol === 'https:' ? parsed.href : '';
+    } catch {
+        return '';
+    }
+}
+
 const INTENSITY_STYLE = {
     unknown: { intensityPercent: 0, statusColor: '#A0A0A0' },
     low: { intensityPercent: 20, statusColor: '#1DB954' },
@@ -59,6 +68,7 @@ function escapedEntry(entry) {
 function buildWellnessSnapshotPayload(opts = {}) {
     const signals = opts.signals || {};
     return {
+        backgroundImageUrl: httpsUrl(process.env.CAREPULSE_WELLNESS_BACKGROUND_URL),
         memberName: escapeSsml(opts.memberName || 'Member'),
         timeframe: escapeSsml(opts.timeframe || 'this week'),
         summaryLine: escapeSsml(opts.summaryLine || ''),

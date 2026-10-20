@@ -66,6 +66,7 @@
             { "name": "followupStatus", "type": "FOLLOWUP_STATUS" }
           ],
           "samples": [
+            "{followupStatus}",
             "I feel {followupStatus}",
             "I am {followupStatus}",
             "I still feel {followupStatus}",
@@ -273,8 +274,11 @@
             {
               "name": "followupStatus",
               "type": "FOLLOWUP_STATUS",
-              "elicitationRequired": false,
-              "confirmationRequired": false
+              "elicitationRequired": true,
+              "confirmationRequired": false,
+              "prompts": {
+                "elicitation": "Elicit.Slot.CompleteFollowupIntent.followupStatus"
+              }
             }
           ]
         },
@@ -351,6 +355,17 @@
           ]
         }
       ]
-    }
+    },
+    "prompts": [
+      {
+        "id": "Elicit.Slot.CompleteFollowupIntent.followupStatus",
+        "variations": [
+          {
+            "type": "PlainText",
+            "value": "Do you feel better, the same, or worse?"
+          }
+        ]
+      }
+    ]
   }
 }
