@@ -94,7 +94,7 @@ Resources:
       Timeout: 60
       Environment:
         Variables:
-          ALEXA_SKILL_ID: !Ref SkillId
+          CAREPULSE_ALEXA_SKILL_ID: !Ref SkillId
           VOICE_TIMEOUT_MS: '1200'
           HEALTH_TABLE_NAME: !Ref HealthMetricsTable
           CARE_TABLE_NAME: !Ref CarePulseTable

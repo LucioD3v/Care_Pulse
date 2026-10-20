@@ -1,6 +1,6 @@
 'use strict';
 
-process.env.ALEXA_SKILL_ID = 'expected-skill';
+process.env.CAREPULSE_ALEXA_SKILL_ID = 'expected-skill';
 const { test, mock } = require('node:test');
 const assert = require('node:assert/strict');
 const { handler } = require('../index');

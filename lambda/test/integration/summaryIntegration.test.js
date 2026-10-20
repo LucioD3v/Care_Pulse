@@ -12,7 +12,7 @@ const { addCareDashboard } = require('../../care_dashboard');
 
 const environment = { ...process.env };
 beforeEach(() => {
-    for (const key of ['CARE_TABLE_NAME', 'DEMO_OWNER_ID', 'ALEXA_SKILL_ID']) delete process.env[key];
+    for (const key of ['CARE_TABLE_NAME', 'DEMO_OWNER_ID', 'CAREPULSE_ALEXA_SKILL_ID']) delete process.env[key];
     repository.resetMockRecords();
     mock.method(console, 'info', () => {});
 });

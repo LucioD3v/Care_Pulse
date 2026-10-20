@@ -1,0 +1,20 @@
+{
+  "type": "APL",
+  "version": "1.7",
+  "theme": "light",
+  "background": "#0B3D82",
+  "mainTemplate": {
+    "parameters": ["coverData"],
+    "items": [
+      {
+        "type": "Image",
+        "source": "${coverData.imageUrl}",
+        "width": "100vw",
+        "height": "100vh",
+        "scale": "best-fill",
+        "align": "center",
+        "accessibilityLabel": "CarePulse welcome cover"
+      }
+    ]
+  }
+}
