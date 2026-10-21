@@ -97,6 +97,16 @@ The following six names describe the original target tool contract. The reposito
 | `trigger_emergency_alert` | `user_id, alert_type` | Proposed red-flag override route to an emergency notification policy and SNS. | **Not exposed or implemented.** Emergency guidance only tells the user to contact emergency services. |
 | `send_caregiver_alert` | `user_id, caregiver_id, summary` | Publish a minimum-data notification to the authorized caregiver through SNS. | Revalidates the persisted consent, completed result, and recipient binding. The external `authorized` argument is removed. An outbox claim prevents concurrent duplicate publication. |
 
+### Latency (Alexa+ limit: 500 ms)
+
+Alexa+ requires MCP round trips under 500 ms. The MCP Lambda defaults to 1024 MB, loads the SNS SDK only when a notification is sent, and supports provisioned concurrency (`mcpProvisionedConcurrency=1`, billed while on) to keep cold starts off the request path. `McpLatencyAlarm` fires when p95 handler time reaches 400 ms in 2 of 3 periods, and `McpEndToEndLatencyAlarm` watches API Gateway p95 latency for `POST /mcp` (which includes cold starts) against 500 ms; route-level metrics are enabled for this and add a small CloudWatch charge. OAuth routes report as `mcp-oauth` and have their own `McpOAuthErrorsAlarm`. Measure a deployment with:
+
+```
+CAREPULSE_MCP_KEY=<key> node scripts/measure_mcp_latency.js --mcp-url <McpEndpoint>
+```
+
+It reports the first request (which includes any cold start) and p50/p95/max for `ping`, `tools/list`, and `get_care_context`, and exits with an error if the first request or the worst p95 is not under 500 ms. It opens an MCP session (a stored record), and in demo mode `get_care_context` creates a default context for a member that does not exist, so measure with an existing member. With the shared key on a deployment without `DEMO_OWNER_ID`, add `--owner-id <id>`. Use `CAREPULSE_MCP_TOKEN` instead of the key to measure the OAuth path.
+
 ### Tools Currently Returned by `tools/list`
 
 The MCP catalog contains `get_care_context`, `log_wellness_event`, `get_wellness_history`, `compare_with_baseline`, `create_followup`, `request_consent`, `send_caregiver_alert`, `ingest_bee_context`, `list_followups`, `complete_followup`, `cancel_followup`, and `revoke_consent`. The Node.js JSON-RPC Streamable HTTP gateway negotiates `2025-11-25`, `2025-06-18`, or `2025-03-26`. Demo clients use `x-carepulse-mcp-key` and an initialized MCP session. Completion saves the result and any alert job atomically; it does not itself confirm notification delivery. Production mode requires a verified bearer access token and a server-side identity/profile binding.

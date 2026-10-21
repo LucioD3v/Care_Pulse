@@ -153,15 +153,21 @@ async function handle(event) {
     return response(200, rpcError(request.id, -32601, 'Method not found.'), headers);
 }
 
-exports.handler = (event, context) => withRequest('mcp', context, 12000, async () => {
-    if (isOAuthRoute(event)) {
-        try {
-            return await handleOAuth(event);
-        } catch {
-            metric('ServiceErrors');
-            return response(500, { error: 'server_error' });
-        }
+// OAuth routes (the token exchange waits on Cognito) report as "mcp-oauth", so McpLatencyAlarm and
+// other Service=mcp metrics only describe MCP calls.
+const handleOAuthRequest = (event, context) => withRequest('mcp-oauth', context, 12000, async () => {
+    try {
+        const result = await handleOAuth(event);
+        // Returned 5xx (Cognito unreachable, not configured, or an upstream 5xx) must reach McpOAuthErrorsAlarm too.
+        if (result.statusCode >= 500) metric('ServiceErrors');
+        return result;
+    } catch {
+        metric('ServiceErrors');
+        return response(500, { error: 'server_error' });
     }
+});
+
+exports.handler = (event, context) => isOAuthRoute(event) ? handleOAuthRequest(event, context) : withRequest('mcp', context, 12000, async () => {
     try {
         const principal = await fromMcp(event);
         const result = await withPrincipal(principal, () => handle(event));
