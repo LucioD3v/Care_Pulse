@@ -1,19 +1,235 @@
 {
   "type": "APL",
   "version": "1.7",
-  "theme": "light",
+  "theme": "dark",
   "background": "#0B3D82",
+  "import": [
+    { "name": "alexa-viewport-profiles", "version": "1.6.0" }
+  ],
   "mainTemplate": {
     "parameters": ["coverData"],
     "items": [
       {
-        "type": "Image",
-        "source": "${coverData.imageUrl}",
+        "type": "Pager",
+        "id": "welcomeMenuPager",
         "width": "100vw",
         "height": "100vh",
-        "scale": "best-fill",
-        "align": "center",
-        "accessibilityLabel": "CarePulse welcome cover"
+        "initialPage": 0,
+        "navigation": "none",
+        "onMount": [
+          {
+            "type": "AutoPage",
+            "componentId": "welcomeMenuPager",
+            "count": 1,
+            "delay": 5000,
+            "duration": 0,
+            "screenLock": true
+          }
+        ],
+        "handlePageMove": [
+          {
+            "when": "${event.direction == 'left' || event.direction == 'right'}",
+            "drawOrder": "nextAbove",
+            "commands": [
+              {
+                "type": "SetValue",
+                "componentId": "${event.currentChild.uid}",
+                "property": "opacity",
+                "value": "${1 - event.amount}"
+              },
+              {
+                "type": "SetValue",
+                "componentId": "${event.nextChild.uid}",
+                "property": "opacity",
+                "value": "${event.amount}"
+              },
+              {
+                "type": "SetValue",
+                "componentId": "${event.nextChild.uid}",
+                "property": "transform",
+                "value": [{ "translateX": "${24 * (1 - event.amount)}dp" }]
+              }
+            ]
+          }
+        ],
+        "items": [
+          {
+            "type": "Image",
+            "source": "${coverData.imageUrl}",
+            "width": "100vw",
+            "height": "100vh",
+            "scale": "best-fill",
+            "align": "center",
+            "accessibilityLabel": "CarePulse welcome cover"
+          },
+          {
+            "type": "Container",
+            "width": "100vw",
+            "height": "100vh",
+            "items": [
+              {
+                "type": "Image",
+                "position": "absolute",
+                "source": "${coverData.backgroundImageUrl}",
+                "width": "100vw",
+                "height": "100vh",
+                "scale": "best-fill",
+                "align": "center",
+                "accessibilityLabel": "CarePulse home background"
+              },
+              {
+                "type": "Frame",
+                "position": "absolute",
+                "width": "100vw",
+                "height": "100vh",
+                "backgroundColor": "rgba(4, 20, 54, 0.10)"
+              },
+              {
+                "type": "Container",
+                "position": "absolute",
+                "width": "100vw",
+                "height": "100vh",
+                "direction": "row",
+                "alignItems": "center",
+                "justifyContent": "end",
+                "paddingLeft": "${@viewportProfile == @hubLandscapeSmall ? '28vw' : '43vw'}",
+                "paddingRight": "${@viewportProfile == @hubLandscapeSmall ? '22dp' : '62dp'}",
+                "paddingTop": "${@viewportProfile == @hubLandscapeSmall ? '18dp' : '40dp'}",
+                "paddingBottom": "${@viewportProfile == @hubLandscapeSmall ? '18dp' : '40dp'}",
+                "items": [
+                  {
+                    "type": "Frame",
+                    "width": "100%",
+                    "backgroundColor": "rgba(8, 30, 72, 0.86)",
+                    "borderColor": "rgba(202, 244, 237, 0.58)",
+                    "borderWidth": "1dp",
+                    "borderRadius": "28dp",
+                    "paddingLeft": "${@viewportProfile == @hubLandscapeSmall ? '22dp' : '34dp'}",
+                    "paddingRight": "${@viewportProfile == @hubLandscapeSmall ? '22dp' : '34dp'}",
+                    "paddingTop": "${@viewportProfile == @hubLandscapeSmall ? '20dp' : '28dp'}",
+                    "paddingBottom": "${@viewportProfile == @hubLandscapeSmall ? '20dp' : '28dp'}",
+                    "item": {
+                      "type": "Container",
+                      "items": [
+                        {
+                          "type": "Text",
+                          "text": "CARE<span color='#B9F5E5'>PULSE</span>",
+                          "fontSize": "${@viewportProfile == @hubLandscapeSmall ? '13dp' : '16dp'}",
+                          "fontWeight": "700",
+                          "letterSpacing": "1.2dp",
+                          "color": "#FFFFFF"
+                        },
+                        {
+                          "type": "Text",
+                          "text": "How can I help?",
+                          "fontSize": "${@viewportProfile == @hubLandscapeSmall ? '28dp' : '40dp'}",
+                          "fontWeight": "700",
+                          "color": "#FFFFFF",
+                          "maxLines": 1,
+                          "paddingTop": "8dp"
+                        },
+                        {
+                          "type": "Text",
+                          "text": "Choose an option or ask by voice.",
+                          "fontSize": "${@viewportProfile == @hubLandscapeSmall ? '15dp' : '19dp'}",
+                          "color": "#DCECF4",
+                          "paddingTop": "4dp",
+                          "paddingBottom": "${@viewportProfile == @hubLandscapeSmall ? '12dp' : '18dp'}"
+                        },
+                        {
+                          "type": "TouchWrapper",
+                          "id": "welcomeReportButton",
+                          "role": "button",
+                          "accessibilityLabel": "Share how I feel",
+                          "onPress": [{
+                            "type": "SendEvent",
+                            "arguments": ["welcome-action", "report"]
+                          }],
+                          "item": {
+                            "type": "Frame",
+                            "height": "${@viewportProfile == @hubLandscapeSmall ? '58dp' : '68dp'}",
+                            "borderRadius": "17dp",
+                            "backgroundColor": "#DFFFF3",
+                            "borderColor": "#93DDCF",
+                            "borderWidth": "2dp",
+                            "item": {
+                              "type": "Container",
+                              "height": "100%",
+                              "justifyContent": "center",
+                              "paddingLeft": "20dp",
+                              "items": [
+                                { "type": "Text", "text": "Share how I feel", "fontSize": "${@viewportProfile == @hubLandscapeSmall ? '19dp' : '23dp'}", "fontWeight": "700", "color": "#123C63" },
+                                { "type": "Text", "text": "Record a wellness update", "fontSize": "12dp", "color": "#315D77" }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "type": "TouchWrapper",
+                          "id": "welcomeSummaryButton",
+                          "role": "button",
+                          "accessibilityLabel": "View my wellness summary",
+                          "paddingTop": "10dp",
+                          "onPress": [{
+                            "type": "SendEvent",
+                            "arguments": ["welcome-action", "summary"]
+                          }],
+                          "item": {
+                            "type": "Frame",
+                            "height": "${@viewportProfile == @hubLandscapeSmall ? '58dp' : '68dp'}",
+                            "borderRadius": "17dp",
+                            "backgroundColor": "rgba(226, 213, 255, 0.22)",
+                            "borderColor": "#CEB8F6",
+                            "borderWidth": "2dp",
+                            "item": {
+                              "type": "Container",
+                              "height": "100%",
+                              "justifyContent": "center",
+                              "paddingLeft": "20dp",
+                              "items": [
+                                { "type": "Text", "text": "View my summary", "fontSize": "${@viewportProfile == @hubLandscapeSmall ? '19dp' : '23dp'}", "fontWeight": "700", "color": "#FFFFFF" },
+                                { "type": "Text", "text": "Review recent wellness reports", "fontSize": "12dp", "color": "#DDEEF3" }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "type": "TouchWrapper",
+                          "id": "welcomeScheduleButton",
+                          "role": "button",
+                          "accessibilityLabel": "Schedule a check-in",
+                          "paddingTop": "10dp",
+                          "onPress": [{
+                            "type": "SendEvent",
+                            "arguments": ["welcome-action", "schedule"]
+                          }],
+                          "item": {
+                            "type": "Frame",
+                            "height": "${@viewportProfile == @hubLandscapeSmall ? '58dp' : '68dp'}",
+                            "borderRadius": "17dp",
+                            "backgroundColor": "rgba(255, 255, 255, 0.15)",
+                            "borderColor": "rgba(190, 241, 231, 0.62)",
+                            "borderWidth": "2dp",
+                            "item": {
+                              "type": "Container",
+                              "height": "100%",
+                              "justifyContent": "center",
+                              "paddingLeft": "20dp",
+                              "items": [
+                                { "type": "Text", "text": "Schedule a check-in", "fontSize": "${@viewportProfile == @hubLandscapeSmall ? '19dp' : '23dp'}", "fontWeight": "700", "color": "#FFFFFF" },
+                                { "type": "Text", "text": "Plan a follow-up", "fontSize": "12dp", "color": "#DDEEF3" }
+                              ]
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       }
     ]
   }

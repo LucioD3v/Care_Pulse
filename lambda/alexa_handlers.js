@@ -28,9 +28,23 @@ const { metric } = require('./observability');
 const { currentPrincipal, defaultMember, AccessError } = require('./access_control');
 const { isDemo } = require('./runtime_config');
 const { SIGNALS, STATES: REPORT_STATES, normalize } = require('./care_validation');
-const { addWelcomePresentation } = require('./welcome_presentation');
+const { DOCUMENT_TOKEN: WELCOME_MENU_TOKEN, addWelcomePresentation } = require('./welcome_presentation');
+const { isAPLUserEvent } = require('./apl/aplSupport');
+const {
+    DOCUMENT_TOKEN: REPORT_WELLNESS_TOKEN,
+    suggestedFollowupTimes,
+    addReportWellnessPresentation
+} = require('./report_wellness_presentation');
+const {
+    DOCUMENT_TOKEN: DUE_FOLLOWUP_TOKEN,
+    addDueFollowupPresentation
+} = require('./due_followup_presentation');
+const { addFollowupCompletionPresentation } = require('./followup_completion_presentation');
+const { addPermissionPresentation } = require('./permission_presentation');
 
 const STATES = {
+    WELCOME_MENU: 'WELCOME_MENU',
+    AWAITING_WELLNESS_REPORT: 'AWAITING_WELLNESS_REPORT',
     AWAITING_FOLLOWUP_CONFIRMATION: 'AWAITING_FOLLOWUP_CONFIRMATION',
     AWAITING_CONSENT_CONFIRMATION: 'AWAITING_CONSENT_CONFIRMATION',
     AWAITING_FOLLOWUP_STATUS: 'AWAITING_FOLLOWUP_STATUS',
@@ -98,7 +112,7 @@ function validTime(value) {
 }
 
 function notificationChannel(destination) {
-    if (isDemo()) return 'configured demo SNS topic';
+    if (isDemo()) return 'CarePulse notification service';
     if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(destination?.endpoint || '')) return 'verified email address';
     if (/^\+[1-9]\d{6,14}$/.test(destination?.endpoint || '')) return 'verified phone number by text message';
     return 'verified notification channel';
@@ -177,6 +191,47 @@ async function ensureFollowup(handlerInput, { memberName, signal, dueTime }) {
     });
 }
 
+async function scheduleFollowupAndRequestConsent(handlerInput, { memberName, signal, dueTime }) {
+    const userOwnerId = ownerId(handlerInput);
+    const followup = await ensureFollowup(handlerInput, { memberName, signal, dueTime });
+    const context = await getCareContext({ ownerId: userOwnerId, memberName });
+    const destination = await resolveCaregiver({ ownerId: userOwnerId, memberName,
+        caregiverName: context.caregiverName });
+    const channel = notificationChannel(destination);
+    saveConversationState(handlerInput, {
+        conversationState: STATES.AWAITING_CONSENT_CONFIRMATION,
+        memberName,
+        caregiverName: context.caregiverName,
+        signal,
+        followupId: followup.followupId,
+        notificationChannel: channel
+    });
+    const prompt = COPY.scheduleAndConsent(followup.dueTime, context.caregiverName, signal, followup.dueDate,
+        scheduleText(handlerInput, followup, context.timezone), channel);
+    speakText(handlerInput, prompt);
+    return repromptText(handlerInput, prompt).getResponse();
+}
+
+function reportPresentationOptions(handlerInput, { memberName, signal, state, summary, preferredTime, timezone,
+    showFollowupOptions = true, discreetMode = false }) {
+    const requestDate = new Date(handlerInput.requestEnvelope.request.timestamp || Date.now());
+    const options = suggestedFollowupTimes(preferredTime).map(time => {
+        const schedule = followupSchedule(handlerInput, time, timezone);
+        return {
+            time,
+            dayLabel: spokenSchedule(schedule.dueDate, time, requestDate, timezone).split(' at ')[0]
+        };
+    });
+    return {
+        headline: discreetMode ? 'Your wellness report is saved'
+            : `${memberName}, your ${String(signal).replace(/-/g, ' ')} report is saved`,
+        summary: discreetMode ? 'Thank you for checking in.'
+            : summary || `You reported feeling ${String(state).replace(/-/g, ' ')}.`,
+        options,
+        showFollowupOptions
+    };
+}
+
 const LaunchRequestHandler = {
     canHandle(handlerInput) {
         return Alexa.getRequestType(handlerInput.requestEnvelope) === 'LaunchRequest';
@@ -202,8 +257,9 @@ const LaunchRequestHandler = {
             });
             const prompt = COPY.dueFollowup(memberName);
             speakText(handlerInput, prompt);
-            return addWelcomePresentation(handlerInput, repromptText(handlerInput, prompt)).getResponse();
+            return addDueFollowupPresentation(handlerInput, repromptText(handlerInput, prompt), prompt).getResponse();
         }
+        saveConversationState(handlerInput, { conversationState: STATES.WELCOME_MENU });
         speakText(handlerInput, COPY.welcome);
         return addWelcomePresentation(handlerInput, repromptText(handlerInput, COPY.welcome)).getResponse();
     }
@@ -248,12 +304,22 @@ const ReportWellnessIntentHandler = {
             signal
         }, { context });
         const observation = await renderVoiceObservation({ memberName, signal, comparison });
+        const presentation = reportPresentationOptions(handlerInput, {
+            memberName,
+            signal,
+            state,
+            summary: comparison.summary,
+            preferredTime: context.preferredFollowupTime || '18:00',
+            timezone: context.timezone,
+            showFollowupOptions: context.followupOffers !== 'off',
+            discreetMode: context.discreetMode === 'on'
+        });
         if (context.followupOffers === 'off') {
             saveConversationState(handlerInput, { conversationState: null });
-            return speakText(handlerInput, COPY.reportSavedWithoutOffer(observation))
+            const responseBuilder = speakText(handlerInput, COPY.reportSavedWithoutOffer(observation))
                 .withSimpleCard(CARD_TITLES.wellness, context.discreetMode === 'on' ? CARD_CONTENT.discreet
-                    : CARD_CONTENT.wellness(memberName, signal, comparison.summary))
-                .getResponse();
+                    : CARD_CONTENT.wellness(memberName, signal, comparison.summary));
+            return addReportWellnessPresentation(handlerInput, responseBuilder, presentation).getResponse();
         }
         saveConversationState(handlerInput, {
             conversationState: STATES.AWAITING_FOLLOWUP_CONFIRMATION,
@@ -265,10 +331,34 @@ const ReportWellnessIntentHandler = {
         const schedule = followupSchedule(handlerInput, followupTime, context.timezone);
         const prompt = `${observation} ${COPY.followupQuestion(scheduleText(handlerInput, schedule, context.timezone))}`;
         speakText(handlerInput, prompt);
-        return repromptText(handlerInput, COPY.followupReprompt(followupTime))
+        const responseBuilder = repromptText(handlerInput, COPY.followupReprompt(followupTime))
             .withSimpleCard(CARD_TITLES.wellness, context.discreetMode === 'on' ? CARD_CONTENT.discreet
-                : CARD_CONTENT.wellness(memberName, signal, comparison.summary))
-            .getResponse();
+                : CARD_CONTENT.wellness(memberName, signal, comparison.summary));
+        return addReportWellnessPresentation(handlerInput, responseBuilder, presentation).getResponse();
+    }
+};
+
+const ReportWellnessUserEventHandler = {
+    canHandle(handlerInput) {
+        const request = handlerInput.requestEnvelope.request;
+        return isAPLUserEvent(handlerInput)
+            && request.token === REPORT_WELLNESS_TOKEN
+            && request.arguments?.[0] === 'schedule-report-checkin';
+    },
+    async handle(handlerInput) {
+        const attributes = sessionAttributes(handlerInput);
+        const dueTime = String(handlerInput.requestEnvelope.request.arguments?.[1] || '');
+        const allowedTimes = suggestedFollowupTimes(attributes.followupTime || '18:00');
+        if (attributes.conversationState !== STATES.AWAITING_FOLLOWUP_CONFIRMATION
+            || !attributes.memberName || !attributes.signal || !allowedTimes.includes(dueTime)) {
+            const prompt = 'That check-in option is no longer available. Please share a new wellness report.';
+            return speakText(handlerInput, prompt).getResponse();
+        }
+        return scheduleFollowupAndRequestConsent(handlerInput, {
+            memberName: attributes.memberName,
+            signal: attributes.signal,
+            dueTime
+        });
     }
 };
 
@@ -282,23 +372,7 @@ const ScheduleFollowupIntentHandler = {
         const signal = getSlotValue(handlerInput, 'wellnessSignal') || 'tiredness';
         const dueTime = getSlotValue(handlerInput, 'followupTime') || undefined;
         if (dueTime && !validTime(dueTime)) return elicitSlot(handlerInput, 'followupTime', COPY.followupTimeNeeded);
-        const followup = await ensureFollowup(handlerInput, { memberName, signal, dueTime });
-        const context = await getCareContext({ ownerId: ownerId(handlerInput), memberName });
-        const destination = await resolveCaregiver({ ownerId: ownerId(handlerInput), memberName,
-            caregiverName: context.caregiverName });
-        const channel = notificationChannel(destination);
-        saveConversationState(handlerInput, {
-            conversationState: STATES.AWAITING_CONSENT_CONFIRMATION,
-            memberName,
-            caregiverName: context.caregiverName,
-            signal,
-            followupId: followup.followupId,
-            notificationChannel: channel
-        });
-        const prompt = COPY.scheduleAndConsent(followup.dueTime, context.caregiverName, signal, followup.dueDate,
-            scheduleText(handlerInput, followup, context.timezone), channel);
-        speakText(handlerInput, prompt);
-        return repromptText(handlerInput, prompt).getResponse();
+        return scheduleFollowupAndRequestConsent(handlerInput, { memberName, signal, dueTime });
     }
 };
 
@@ -381,10 +455,40 @@ const CompleteFollowupIntentHandler = {
         } else {
             speech = COPY.noAlert(followupStatus);
         }
-        return speakText(handlerInput, speech)
+        const response = speakText(handlerInput, speech)
             .withSimpleCard(CARD_TITLES.followup, context.discreetMode === 'on' ? CARD_CONTENT.discreet
-                : CARD_CONTENT.followup(memberName, followupStatus, alertStatus))
-            .getResponse();
+                : CARD_CONTENT.followup(memberName, followupStatus, alertStatus));
+        return addFollowupCompletionPresentation(handlerInput, response, {
+            memberName,
+            status: followupStatus,
+            alertStatus,
+            discreetMode: context.discreetMode
+        }).getResponse();
+    }
+};
+
+const DueFollowupUserEventHandler = {
+    canHandle(handlerInput) {
+        const request = handlerInput.requestEnvelope.request;
+        return isAPLUserEvent(handlerInput)
+            && request.token === DUE_FOLLOWUP_TOKEN
+            && request.arguments?.[0] === 'complete-due-followup';
+    },
+    async handle(handlerInput) {
+        const attributes = sessionAttributes(handlerInput);
+        const status = String(handlerInput.requestEnvelope.request.arguments?.[1] || '').toLowerCase();
+        if (attributes.conversationState !== STATES.AWAITING_FOLLOWUP_STATUS
+            || !attributes.memberName || !attributes.followupId
+            || !['better', 'same', 'worse'].includes(status)) {
+            const prompt = 'That follow-up option is no longer available. Please open CarePulse again.';
+            return speakText(handlerInput, prompt).getResponse();
+        }
+        handlerInput.requestEnvelope.request.intent = {
+            name: 'CompleteFollowupIntent',
+            confirmationStatus: 'NONE',
+            slots: { followupStatus: { name: 'followupStatus', value: status } }
+        };
+        return CompleteFollowupIntentHandler.handle(handlerInput);
     }
 };
 
@@ -500,6 +604,46 @@ const GetWellnessSummaryIntentHandler = createGetWellnessSummaryHandler({
     speakText
 });
 
+const WelcomeMenuUserEventHandler = {
+    canHandle(handlerInput) {
+        const request = handlerInput.requestEnvelope.request;
+        return isAPLUserEvent(handlerInput)
+            && request.token === WELCOME_MENU_TOKEN
+            && request.arguments?.[0] === 'welcome-action';
+    },
+    async handle(handlerInput) {
+        const attributes = sessionAttributes(handlerInput);
+        const action = String(handlerInput.requestEnvelope.request.arguments?.[1] || '').toLowerCase();
+        if (attributes.conversationState !== STATES.WELCOME_MENU
+            || !['report', 'summary', 'schedule'].includes(action)) {
+            return speakText(handlerInput, 'That option is no longer available. Please open CarePulse again.').getResponse();
+        }
+        const intentName = {
+            report: 'ReportWellnessIntent',
+            summary: 'GetWellnessSummaryIntent',
+            schedule: 'ScheduleFollowupIntent'
+        }[action];
+        handlerInput.requestEnvelope.request.intent = {
+            name: intentName,
+            confirmationStatus: 'NONE',
+            slots: {}
+        };
+        if (action === 'report') {
+            // Dialog directives such as Dialog.ElicitSlot are valid only for an
+            // IntentRequest. APL buttons arrive as UserEvent requests, so keep
+            // the microphone open with a normal prompt and let the next voice
+            // utterance resolve to ReportWellnessIntent.
+            saveConversationState(handlerInput, { conversationState: STATES.AWAITING_WELLNESS_REPORT });
+            const prompt = COPY.reportPrompt;
+            return repromptText(handlerInput, prompt)
+                .speak(`<speak>${escapeSsml(prompt)}</speak>`)
+                .getResponse();
+        }
+        if (action === 'summary') return GetWellnessSummaryIntentHandler.handle(handlerInput);
+        return ScheduleFollowupIntentHandler.handle(handlerInput);
+    }
+};
+
 const SetCarePreferencesIntentHandler = {
     canHandle(handlerInput) {
         return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
@@ -599,24 +743,10 @@ const YesIntentHandler = {
             return speakText(handlerInput, speech).getResponse();
         }
         if (attributes.conversationState === STATES.AWAITING_FOLLOWUP_CONFIRMATION) {
-            const followup = await ensureFollowup(handlerInput, {
+            return scheduleFollowupAndRequestConsent(handlerInput, {
                 memberName: attributes.memberName,
                 signal: attributes.signal
             });
-            const context = await getCareContext({ ownerId: ownerId(handlerInput), memberName: attributes.memberName });
-            const destination = await resolveCaregiver({ ownerId: ownerId(handlerInput),
-                memberName: attributes.memberName, caregiverName: context.caregiverName });
-            const channel = notificationChannel(destination);
-            saveConversationState(handlerInput, {
-                conversationState: STATES.AWAITING_CONSENT_CONFIRMATION,
-                caregiverName: context.caregiverName,
-                followupId: followup.followupId,
-                notificationChannel: channel
-            });
-            const prompt = COPY.scheduleAndConsent(followup.dueTime, context.caregiverName, attributes.signal, followup.dueDate,
-                scheduleText(handlerInput, followup, context.timezone), channel);
-            speakText(handlerInput, prompt);
-            return repromptText(handlerInput, prompt).getResponse();
         }
         if (attributes.conversationState === STATES.AWAITING_CONSENT_CONFIRMATION) {
             await tracedTool('request_consent', {
@@ -628,10 +758,14 @@ const YesIntentHandler = {
             });
             saveConversationState(handlerInput, { conversationState: null });
             const context = await getCareContext({ ownerId: ownerId(handlerInput), memberName: attributes.memberName });
-            return speakText(handlerInput, COPY.consentSaved(attributes.caregiverName))
+            const response = speakText(handlerInput, COPY.consentSaved(attributes.caregiverName))
                 .withSimpleCard(CARD_TITLES.permission, context.discreetMode === 'on' ? CARD_CONTENT.discreet
-                    : CARD_CONTENT.permission(attributes.caregiverName, attributes.signal))
-                .getResponse();
+                    : CARD_CONTENT.permission(attributes.caregiverName, attributes.signal));
+            return addPermissionPresentation(handlerInput, response, {
+                caregiverName: attributes.caregiverName,
+                signal: attributes.signal,
+                discreetMode: context.discreetMode
+            }).getResponse();
         }
         if ([STATES.AWAITING_FOLLOWUP_SELECTION, STATES.AWAITING_RESCHEDULE_TIME].includes(attributes.conversationState)) {
             const prompt = pendingPrompt(handlerInput);
@@ -704,6 +838,8 @@ const EmergencyGuidanceIntentHandler = {
 function pendingPrompt(handlerInput) {
     const attributes = sessionAttributes(handlerInput);
     switch (attributes.conversationState) {
+        case STATES.AWAITING_WELLNESS_REPORT:
+            return COPY.reportPrompt;
         case STATES.AWAITING_FOLLOWUP_CONFIRMATION:
             return COPY.followupReprompt(attributes.followupTime || '18:00');
         case STATES.AWAITING_CONSENT_CONFIRMATION:
@@ -795,12 +931,15 @@ const skill = Alexa.SkillBuilders.custom()
     .addRequestHandlers(
         LaunchRequestHandler,
         ReportWellnessIntentHandler,
+        ReportWellnessUserEventHandler,
         ScheduleFollowupIntentHandler,
         ConfigureCaregiverAlertIntentHandler,
         CompleteFollowupIntentHandler,
+        DueFollowupUserEventHandler,
         ManageFollowupIntentHandler,
         CorrectReportIntentHandler,
         GetWellnessSummaryIntentHandler,
+        WelcomeMenuUserEventHandler,
         SetCarePreferencesIntentHandler,
         LinkBeeIntentHandler,
         UnlinkBeeIntentHandler,

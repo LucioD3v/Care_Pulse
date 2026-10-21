@@ -29,6 +29,7 @@ const ALERT_STATUS = {
 
 const COPY = {
     welcome: 'Welcome to CarePulse. You can tell me how you feel, ask for a wellness summary, or schedule a check-in. How can I help?',
+    reportPrompt: 'Tell me how you feel. For example, say: I feel more tired than usual.',
     missingSignal: 'What would you like me to record, for example tiredness, sleep, mood, or appetite?',
     missingStatus: 'Do you feel better, the same, or worse?',
     followupQuestion: schedule => `Would you like a check-in ${schedule}?`,

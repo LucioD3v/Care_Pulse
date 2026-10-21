@@ -1,0 +1,161 @@
+{
+  "type": "APL",
+  "version": "1.7",
+  "theme": "dark",
+  "background": "#102F62",
+  "import": [
+    { "name": "alexa-viewport-profiles", "version": "1.6.0" }
+  ],
+  "mainTemplate": {
+    "parameters": ["permissionData"],
+    "items": [
+      {
+        "type": "Container",
+        "width": "100vw",
+        "height": "100vh",
+        "items": [
+          {
+            "type": "Image",
+            "position": "absolute",
+            "width": "100vw",
+            "height": "100vh",
+            "source": "${permissionData.backgroundImageUrl}",
+            "scale": "best-fill",
+            "align": "center",
+            "accessibilityLabel": "CarePulse permission confirmation background"
+          },
+          {
+            "type": "Frame",
+            "position": "absolute",
+            "width": "100vw",
+            "height": "100vh",
+            "backgroundColor": "rgba(4, 20, 54, 0.08)"
+          },
+          {
+            "type": "Container",
+            "position": "absolute",
+            "width": "100vw",
+            "height": "100vh",
+            "direction": "row",
+            "alignItems": "center",
+            "paddingLeft": "${@viewportProfile == @hubLandscapeSmall ? '24dp' : '58dp'}",
+            "paddingRight": "${@viewportProfile == @hubLandscapeSmall ? '36vw' : '51vw'}",
+            "paddingTop": "${@viewportProfile == @hubLandscapeSmall ? '20dp' : '44dp'}",
+            "paddingBottom": "${@viewportProfile == @hubLandscapeSmall ? '20dp' : '44dp'}",
+            "items": [
+              {
+                "type": "Frame",
+                "width": "100%",
+                "backgroundColor": "rgba(8, 30, 72, 0.86)",
+                "borderColor": "rgba(202, 244, 237, 0.60)",
+                "borderWidth": "1dp",
+                "borderRadius": "28dp",
+                "paddingLeft": "${@viewportProfile == @hubLandscapeSmall ? '22dp' : '34dp'}",
+                "paddingRight": "${@viewportProfile == @hubLandscapeSmall ? '22dp' : '34dp'}",
+                "paddingTop": "${@viewportProfile == @hubLandscapeSmall ? '20dp' : '30dp'}",
+                "paddingBottom": "${@viewportProfile == @hubLandscapeSmall ? '20dp' : '30dp'}",
+                "item": {
+                  "type": "Container",
+                  "items": [
+                    {
+                      "type": "Text",
+                      "text": "CARE<span color='#B9F5E5'>PULSE</span>  •  PERMISSION",
+                      "fontSize": "${@viewportProfile == @hubLandscapeSmall ? '13dp' : '16dp'}",
+                      "fontWeight": "700",
+                      "letterSpacing": "1.1dp",
+                      "color": "#FFFFFF"
+                    },
+                    {
+                      "type": "Text",
+                      "text": "Permission saved",
+                      "fontSize": "${@viewportProfile == @hubLandscapeSmall ? '28dp' : '40dp'}",
+                      "fontWeight": "700",
+                      "color": "#FFFFFF",
+                      "maxLines": 1,
+                      "paddingTop": "8dp"
+                    },
+                    {
+                      "type": "Text",
+                      "text": "${permissionData.message}",
+                      "fontSize": "${@viewportProfile == @hubLandscapeSmall ? '15dp' : '19dp'}",
+                      "color": "#DCECF4",
+                      "maxLines": 3,
+                      "paddingTop": "5dp",
+                      "paddingBottom": "${@viewportProfile == @hubLandscapeSmall ? '14dp' : '20dp'}"
+                    },
+                    {
+                      "type": "Frame",
+                      "when": "${permissionData.showDetails}",
+                      "backgroundColor": "rgba(19, 72, 92, 0.58)",
+                      "borderColor": "rgba(185, 245, 229, 0.52)",
+                      "borderWidth": "1dp",
+                      "borderRadius": "18dp",
+                      "paddingLeft": "18dp",
+                      "paddingRight": "18dp",
+                      "paddingTop": "14dp",
+                      "paddingBottom": "14dp",
+                      "item": {
+                        "type": "Container",
+                        "items": [
+                          {
+                            "type": "Container",
+                            "direction": "row",
+                            "alignItems": "center",
+                            "items": [
+                              { "type": "Text", "text": "SHARED WITH", "width": "34%", "fontSize": "11dp", "fontWeight": "700", "letterSpacing": "0.8dp", "color": "#B9D9E5" },
+                              { "type": "Text", "text": "${permissionData.caregiverName}", "width": "66%", "fontSize": "${@viewportProfile == @hubLandscapeSmall ? '18dp' : '21dp'}", "fontWeight": "700", "color": "#FFFFFF", "maxLines": 1 }
+                            ]
+                          },
+                          {
+                            "type": "Frame",
+                            "height": "1dp",
+                            "backgroundColor": "rgba(220, 236, 244, 0.22)",
+                            "marginTop": "10dp",
+                            "marginBottom": "10dp"
+                          },
+                          {
+                            "type": "Container",
+                            "direction": "row",
+                            "alignItems": "center",
+                            "items": [
+                              { "type": "Text", "text": "ONLY IF", "width": "34%", "fontSize": "11dp", "fontWeight": "700", "letterSpacing": "0.8dp", "color": "#B9D9E5" },
+                              { "type": "Text", "text": "${permissionData.condition}", "width": "66%", "fontSize": "${@viewportProfile == @hubLandscapeSmall ? '16dp' : '19dp'}", "fontWeight": "600", "color": "#FFFFFF", "maxLines": 2 }
+                            ]
+                          },
+                          {
+                            "type": "Frame",
+                            "height": "1dp",
+                            "backgroundColor": "rgba(220, 236, 244, 0.22)",
+                            "marginTop": "10dp",
+                            "marginBottom": "10dp"
+                          },
+                          {
+                            "type": "Container",
+                            "direction": "row",
+                            "alignItems": "center",
+                            "items": [
+                              { "type": "Text", "text": "SCOPE", "width": "34%", "fontSize": "11dp", "fontWeight": "700", "letterSpacing": "0.8dp", "color": "#B9D9E5" },
+                              { "type": "Text", "text": "This follow-up only", "width": "66%", "fontSize": "${@viewportProfile == @hubLandscapeSmall ? '16dp' : '19dp'}", "fontWeight": "600", "color": "#FFFFFF", "maxLines": 1 }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "type": "Text",
+                      "when": "${!permissionData.showDetails}",
+                      "text": "Your private sharing preference has been recorded safely.",
+                      "fontSize": "${@viewportProfile == @hubLandscapeSmall ? '16dp' : '19dp'}",
+                      "color": "#B9F5E5",
+                      "maxLines": 2
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
