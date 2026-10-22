@@ -40,6 +40,7 @@ function reportWellnessDirective(options = {}) {
                 showFollowupOptions: options.showFollowupOptions !== false,
                 options: (options.options || []).slice(0, 3).map(option => ({
                     time: option.time,
+                    dueDate: option.dueDate,
                     label: spokenTime(option.time),
                     dayLabel: escapeSsml(option.dayLabel || '')
                 }))
