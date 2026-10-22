@@ -1,0 +1,186 @@
+{
+  "type": "APL",
+  "version": "1.7",
+  "theme": "dark",
+  "background": "#102F62",
+  "import": [
+    { "name": "alexa-viewport-profiles", "version": "1.6.0" }
+  ],
+  "mainTemplate": {
+    "parameters": ["completionData"],
+    "items": [
+      {
+        "type": "Container",
+        "width": "100vw",
+        "height": "100vh",
+        "items": [
+          {
+            "type": "Image",
+            "position": "absolute",
+            "width": "100vw",
+            "height": "100vh",
+            "source": "${completionData.backgroundImageUrl}",
+            "scale": "best-fill",
+            "align": "center",
+            "accessibilityLabel": "CarePulse check-in background"
+          },
+          {
+            "type": "Frame",
+            "position": "absolute",
+            "width": "100vw",
+            "height": "100vh",
+            "backgroundColor": "rgba(4, 20, 54, 0.10)"
+          },
+          {
+            "type": "Container",
+            "position": "absolute",
+            "width": "100vw",
+            "height": "100vh",
+            "direction": "row",
+            "alignItems": "center",
+            "justifyContent": "end",
+            "paddingLeft": "${@viewportProfile == @hubLandscapeSmall ? '30vw' : '43vw'}",
+            "paddingRight": "${@viewportProfile == @hubLandscapeSmall ? '24dp' : '64dp'}",
+            "paddingTop": "${@viewportProfile == @hubLandscapeSmall ? '22dp' : '48dp'}",
+            "paddingBottom": "${@viewportProfile == @hubLandscapeSmall ? '22dp' : '48dp'}",
+            "items": [
+              {
+                "type": "Frame",
+                "width": "100%",
+                "backgroundColor": "rgba(8, 30, 72, 0.84)",
+                "borderColor": "rgba(202, 244, 237, 0.58)",
+                "borderWidth": "1dp",
+                "borderRadius": "28dp",
+                "paddingLeft": "${@viewportProfile == @hubLandscapeSmall ? '24dp' : '38dp'}",
+                "paddingRight": "${@viewportProfile == @hubLandscapeSmall ? '24dp' : '38dp'}",
+                "paddingTop": "${@viewportProfile == @hubLandscapeSmall ? '22dp' : '32dp'}",
+                "paddingBottom": "${@viewportProfile == @hubLandscapeSmall ? '22dp' : '32dp'}",
+                "item": {
+                  "type": "Container",
+                  "items": [
+                    {
+                      "type": "Text",
+                      "text": "CARE<span color='#B9F5E5'>PULSE</span>  •  FOLLOW-UP",
+                      "fontSize": "${@viewportProfile == @hubLandscapeSmall ? '13dp' : '16dp'}",
+                      "fontWeight": "700",
+                      "letterSpacing": "1.2dp",
+                      "color": "#FFFFFF"
+                    },
+                    {
+                      "type": "Text",
+                      "text": "Check-in complete",
+                      "fontSize": "${@viewportProfile == @hubLandscapeSmall ? '30dp' : '44dp'}",
+                      "fontWeight": "700",
+                      "color": "#FFFFFF",
+                      "maxLines": 1,
+                      "paddingTop": "10dp"
+                    },
+                    {
+                      "type": "Text",
+                      "text": "${completionData.message}",
+                      "fontSize": "${@viewportProfile == @hubLandscapeSmall ? '17dp' : '22dp'}",
+                      "color": "#DCECF4",
+                      "maxLines": 2,
+                      "paddingTop": "6dp",
+                      "paddingBottom": "${@viewportProfile == @hubLandscapeSmall ? '16dp' : '22dp'}"
+                    },
+                    {
+                      "type": "Frame",
+                      "when": "${completionData.showDetails}",
+                      "backgroundColor": "${completionData.statusBackgroundColor}",
+                      "borderColor": "${completionData.statusBorderColor}",
+                      "borderWidth": "2dp",
+                      "borderRadius": "20dp",
+                      "paddingLeft": "20dp",
+                      "paddingRight": "20dp",
+                      "paddingTop": "14dp",
+                      "paddingBottom": "14dp",
+                      "item": {
+                        "type": "Container",
+                        "direction": "row",
+                        "alignItems": "center",
+                        "items": [
+                          {
+                            "type": "Frame",
+                            "width": "38dp",
+                            "height": "38dp",
+                            "borderRadius": "19dp",
+                            "backgroundColor": "${completionData.statusAccentColor}",
+                            "item": {
+                              "type": "Text",
+                              "text": "✓",
+                              "fontSize": "23dp",
+                              "fontWeight": "700",
+                              "textAlign": "center",
+                              "textAlignVertical": "center",
+                              "color": "#123C63"
+                            }
+                          },
+                          {
+                            "type": "Container",
+                            "grow": 1,
+                            "paddingLeft": "14dp",
+                            "items": [
+                              {
+                                "type": "Text",
+                                "text": "HOW YOU FEEL",
+                                "fontSize": "12dp",
+                                "fontWeight": "700",
+                                "letterSpacing": "1dp",
+                                "color": "#B9D9E5"
+                              },
+                              {
+                                "type": "Text",
+                                "text": "${completionData.statusLabel}",
+                                "fontSize": "${@viewportProfile == @hubLandscapeSmall ? '22dp' : '28dp'}",
+                                "fontWeight": "700",
+                                "color": "#FFFFFF",
+                                "maxLines": 1
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "type": "Container",
+                      "when": "${completionData.showDetails}",
+                      "direction": "row",
+                      "alignItems": "center",
+                      "paddingTop": "${@viewportProfile == @hubLandscapeSmall ? '14dp' : '20dp'}",
+                      "items": [
+                        {
+                          "type": "Frame",
+                          "width": "8dp",
+                          "height": "8dp",
+                          "borderRadius": "4dp",
+                          "backgroundColor": "#B9F5E5"
+                        },
+                        {
+                          "type": "Text",
+                          "text": "Care Circle  •  ${completionData.alertStatus}",
+                          "fontSize": "${@viewportProfile == @hubLandscapeSmall ? '15dp' : '18dp'}",
+                          "color": "#DCECF4",
+                          "maxLines": 2,
+                          "paddingLeft": "12dp"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "Text",
+                      "when": "${!completionData.showDetails}",
+                      "text": "Your private update has been recorded safely.",
+                      "fontSize": "${@viewportProfile == @hubLandscapeSmall ? '17dp' : '21dp'}",
+                      "color": "#B9F5E5",
+                      "maxLines": 2
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

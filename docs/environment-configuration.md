@@ -25,6 +25,10 @@ For a local, table-free run, use `CARE_MODE=demo` and `CARE_STORAGE_MODE=memory`
 | `CAREPULSE_CARD_SMALL_IMAGE_URL` | Public HTTPS URL for the 720×480 Alexa app card image. Serverless also accepts `cardSmallImageUrl`; falls back to `CAREPULSE_COVER_IMAGE_URL`. | Optional. |
 | `CAREPULSE_CARD_LARGE_IMAGE_URL` | Public HTTPS URL for the 1200×800 Alexa app card image. Serverless also accepts `cardLargeImageUrl`; falls back to `CAREPULSE_COVER_IMAGE_URL` and can also supply the APL cover. | Optional. |
 | `CAREPULSE_WELLNESS_BACKGROUND_URL` | Public HTTPS URL for the 1920×1080 wellness-summary APL background. Serverless also accepts `wellnessBackgroundUrl`. The dashboard keeps its solid-color fallback when omitted or invalid. | Optional. |
+| `CAREPULSE_REPORT_BACKGROUND_URL` | Public HTTPS URL for the `ReportWellnessIntent` APL background. Serverless also accepts `reportBackgroundUrl`; falls back to `CAREPULSE_WELLNESS_BACKGROUND_URL` when omitted. | Optional. |
+| `CAREPULSE_HOME_BACKGROUND_URL` | Public HTTPS URL for the actionable home-menu background shown after the five-second cover. Serverless also accepts `homeBackgroundUrl`; falls back through the report and wellness backgrounds. | Optional. |
+| `CAREPULSE_FOLLOWUP_COMPLETE_BACKGROUND_URL` | Public HTTPS URL for the completed follow-up APL background. Serverless also accepts `followupCompleteBackgroundUrl`; falls back to `CAREPULSE_REPORT_BACKGROUND_URL` when omitted. | Optional. |
+| `CAREPULSE_PERMISSION_BACKGROUND_URL` | Public HTTPS URL for the permission-confirmation APL background. Serverless also accepts `permissionBackgroundUrl`; falls back to `CAREPULSE_REPORT_BACKGROUND_URL` when omitted. | Optional. |
 | `MCP_API_KEY` | Nonempty secret expected in the `x-carepulse-mcp-key` request header in demo mode. Serverless resolves `mcpApiKey`, then `MCP_API_KEY`, then `CAREPULSE_MCP_KEY` **only when the preceding value is undefined**. A blank `MCP_API_KEY=` can therefore prevent alias fallback. | A nonempty key is required for demo requests; this variable may be omitted when a parameter or the alias supplies it. |
 | `CAREPULSE_MCP_KEY` | Local Bee bridge secret; use the same value as the deployed demo `MCP_API_KEY`. The bridge reads this name, not `MCP_API_KEY`. It can also be the Serverless fallback if `MCP_API_KEY` is absent rather than blank. | Required only when running `scripts/bee_bridge.js --send` or using it as the gateway-key fallback. |
 | `MCP_MEMORY_SIZE` | Memory in MB for the MCP gateway Lambda; default `1024`. Lambda CPU scales with memory, which shortens initialization and request handling. Serverless also accepts `mcpMemorySize`. | Optional. |
@@ -41,8 +45,8 @@ For a local, table-free run, use `CARE_MODE=demo` and `CARE_STORAGE_MODE=memory`
 
 | Variable | Values and behavior | Required? |
 | :--- | :--- | :--- |
-| `BEDROCK_MODEL_ID` | Exact model or inference-profile ID for optional approved-template selection. Empty disables Bedrock and uses deterministic wording. | Optional. |
-| `BEDROCK_RESOURCE_ARNS` | Comma-separated exact Bedrock foundation-model/profile ARNs allowed by the Alexa IAM role. Set alongside `BEDROCK_MODEL_ID`; blank when Bedrock is disabled. | Required only when enabling Bedrock through Serverless. |
+| `CAREPULSE_BEDROCK_MODEL_ID` | Exact model or inference-profile ID for optional approved-template selection. Empty disables Bedrock and uses deterministic wording. Serverless also accepts `bedrockModelId`. | Optional. |
+| `BEDROCK_RESOURCE_ARNS` | Comma-separated exact Bedrock inference-profile ARN and every destination foundation-model ARN allowed by the Alexa IAM role. Set alongside `CAREPULSE_BEDROCK_MODEL_ID`; blank when Bedrock is disabled. | Required only when enabling Bedrock through Serverless. |
 | `VOICE_TIMEOUT_MS` | Milliseconds for optional Bedrock selection; default `1200`. Finite values are clamped to `50`–`2000`; invalid values fall back to `1200`. | Optional. |
 | `DEFAULT_MEMBER_NAME` | Synthetic demo member name; default `Elena`. It does not enroll a production member. | Optional for demo. |
 | `DEFAULT_CAREGIVER_NAME` | Synthetic demo caregiver name; default `Laura`. It does not verify a production recipient. | Optional for demo. |

@@ -29,11 +29,13 @@ const ALERT_STATUS = {
 
 const COPY = {
     welcome: 'Welcome to CarePulse. You can tell me how you feel, ask for a wellness summary, or schedule a check-in. How can I help?',
+    reportPrompt: 'Tell me how you feel. For example, say: I feel more tired than usual.',
     missingSignal: 'What would you like me to record, for example tiredness, sleep, mood, or appetite?',
     missingStatus: 'Do you feel better, the same, or worse?',
     followupQuestion: schedule => `Would you like a check-in ${schedule}?`,
     followupReprompt: time => `Would you like a follow-up at ${spokenTime(time)}?`,
     dueFollowup: memberName => `${memberName}, we planned to check how you were feeling. Do you feel better, the same, or worse?`,
+    dueFollowupDiscreet: 'We planned to check how you were feeling. Do you feel better, the same, or worse?',
     consentQuestion: (caregiverName, signal, channel = 'configured notification channel') => `Do you authorize ${caregiverName} to receive a brief alert through the ${channel} if you report ${signal.replace(/-/g, ' ')} as the same or worse at this follow-up? Permission lasts up to 36 hours. You can say stop sharing my reports to withdraw it before sending.`,
     scheduleAndConsent: (time, caregiverName, signal, date, schedule, channel) => `The ${signal.replace(/-/g, ' ')} check-in is saved for ${schedule || `${date} at ${spokenTime(time)}`}. Open Care Pulse again then to answer; I will not call you automatically. ${COPY.consentQuestion(caregiverName, signal, channel)}`,
     consentIntroduction: (caregiverName, signal, channel) => `Before I share anything, ${COPY.consentQuestion(caregiverName, signal, channel).replace(/^Do /, 'do ')}`,

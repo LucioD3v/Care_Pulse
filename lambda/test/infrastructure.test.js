@@ -16,6 +16,8 @@ test('Serverless uses separate execution roles and scoped model resources', () =
     assert.doesNotMatch(JSON.stringify(resources.McpRole), /bedrock:/);
     assert.doesNotMatch(JSON.stringify(resources.MonitorRole), /sns:Publish|PutItem|DeleteItem/);
     assert.match(JSON.stringify(resources.AlexaRole), /BedrockInvokeResources/);
+    assert.match(source, /env:CAREPULSE_BEDROCK_MODEL_ID/);
+    assert.doesNotMatch(source, /env:BEDROCK_MODEL_ID/);
     assert.ok(config.functions.alexaSkill.environment.CAREPULSE_ALEXA_SKILL_ID);
     assert.equal(resources.CaregiverAlertsTopic.Properties.KmsMasterKeyId.Ref, 'NotificationKey');
     assert.equal(resources.CarePulseTable.Properties.GlobalSecondaryIndexes[0].IndexName, 'PendingFollowups');

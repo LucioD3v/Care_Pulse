@@ -1,0 +1,207 @@
+{
+  "type": "APL",
+  "version": "1.7",
+  "theme": "dark",
+  "background": "#102F62",
+  "import": [
+    { "name": "alexa-viewport-profiles", "version": "1.6.0" }
+  ],
+  "mainTemplate": {
+    "parameters": ["reportData"],
+    "items": [
+      {
+        "type": "Container",
+        "width": "100vw",
+        "height": "100vh",
+        "items": [
+          {
+            "type": "Image",
+            "position": "absolute",
+            "source": "${reportData.backgroundImageUrl}",
+            "width": "100vw",
+            "height": "100vh",
+            "scale": "best-fill",
+            "align": "center",
+            "accessibilityLabel": "CarePulse wellness journey background"
+          },
+          {
+            "type": "Frame",
+            "position": "absolute",
+            "width": "100vw",
+            "height": "100vh",
+            "backgroundColor": "rgba(4, 20, 54, 0.18)"
+          },
+          {
+            "type": "Container",
+            "width": "${@viewportProfile == @hubLandscapeSmall ? '78vw' : '62vw'}",
+            "height": "100vh",
+            "paddingLeft": "${@viewportProfile == @hubLandscapeSmall ? '24dp' : '56dp'}",
+            "paddingRight": "${@viewportProfile == @hubLandscapeSmall ? '18dp' : '30dp'}",
+            "paddingTop": "${@viewportProfile == @hubLandscapeSmall ? '22dp' : '42dp'}",
+            "paddingBottom": "${@viewportProfile == @hubLandscapeSmall ? '18dp' : '34dp'}",
+            "justifyContent": "center",
+            "items": [
+              {
+                "type": "Frame",
+                "backgroundColor": "rgba(8, 30, 72, 0.86)",
+                "borderColor": "rgba(190, 241, 231, 0.48)",
+                "borderWidth": "1dp",
+                "borderRadius": "28dp",
+                "paddingLeft": "${@viewportProfile == @hubLandscapeSmall ? '22dp' : '34dp'}",
+                "paddingRight": "${@viewportProfile == @hubLandscapeSmall ? '22dp' : '34dp'}",
+                "paddingTop": "${@viewportProfile == @hubLandscapeSmall ? '18dp' : '28dp'}",
+                "paddingBottom": "${@viewportProfile == @hubLandscapeSmall ? '18dp' : '28dp'}",
+                "item": {
+                  "type": "Container",
+                  "items": [
+                    {
+                      "type": "Text",
+                      "text": "CARE<span color='#B9F5E5'>PULSE</span>  •  CHECK-IN SAVED",
+                      "fontSize": "${@viewportProfile == @hubLandscapeSmall ? '14dp' : '17dp'}",
+                      "fontWeight": "700",
+                      "color": "#FFFFFF",
+                      "letterSpacing": "1.2dp"
+                    },
+                    {
+                      "type": "Text",
+                      "text": "${reportData.headline}",
+                      "fontSize": "${@viewportProfile == @hubLandscapeSmall ? '28dp' : '40dp'}",
+                      "fontWeight": "700",
+                      "color": "#FFFFFF",
+                      "maxLines": 2,
+                      "paddingTop": "10dp"
+                    },
+                    {
+                      "type": "Text",
+                      "text": "${reportData.summary}",
+                      "fontSize": "${@viewportProfile == @hubLandscapeSmall ? '17dp' : '22dp'}",
+                      "color": "#DDEEF3",
+                      "maxLines": 3,
+                      "paddingTop": "8dp"
+                    },
+                    {
+                      "type": "Container",
+                      "when": "${reportData.showFollowupOptions}",
+                      "items": [
+                        {
+                          "type": "Text",
+                          "text": "When should we check in again?",
+                          "fontSize": "${@viewportProfile == @hubLandscapeSmall ? '17dp' : '21dp'}",
+                          "fontWeight": "600",
+                          "color": "#FFFFFF",
+                          "paddingTop": "${@viewportProfile == @hubLandscapeSmall ? '16dp' : '24dp'}",
+                          "paddingBottom": "12dp"
+                        },
+                        {
+                          "type": "Container",
+                          "direction": "row",
+                          "width": "100%",
+                          "justifyContent": "spaceBetween",
+                          "items": [
+                            {
+                              "type": "TouchWrapper",
+                              "width": "31%",
+                              "onPress": [{
+                                "type": "SendEvent",
+                                "arguments": ["schedule-report-checkin", "${reportData.options[0].time}"]
+                              }],
+                              "item": {
+                                "type": "Frame",
+                                "height": "${@viewportProfile == @hubLandscapeSmall ? '62dp' : '76dp'}",
+                                "borderRadius": "18dp",
+                                "backgroundColor": "#E6FFF7",
+                                "borderColor": "#93DDCF",
+                                "borderWidth": "2dp",
+                                "item": {
+                                  "type": "Container",
+                                  "height": "100%",
+                                  "alignItems": "center",
+                                  "justifyContent": "center",
+                                  "items": [
+                                    { "type": "Text", "text": "${reportData.options[0].label}", "fontSize": "${@viewportProfile == @hubLandscapeSmall ? '20dp' : '25dp'}", "fontWeight": "700", "color": "#123C63" },
+                                    { "type": "Text", "text": "${reportData.options[0].dayLabel}", "fontSize": "13dp", "color": "#315D77" }
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "TouchWrapper",
+                              "width": "31%",
+                              "onPress": [{
+                                "type": "SendEvent",
+                                "arguments": ["schedule-report-checkin", "${reportData.options[1].time}"]
+                              }],
+                              "item": {
+                                "type": "Frame",
+                                "height": "${@viewportProfile == @hubLandscapeSmall ? '62dp' : '76dp'}",
+                                "borderRadius": "18dp",
+                                "backgroundColor": "rgba(255, 255, 255, 0.16)",
+                                "borderColor": "rgba(214, 199, 255, 0.78)",
+                                "borderWidth": "2dp",
+                                "item": {
+                                  "type": "Container",
+                                  "height": "100%",
+                                  "alignItems": "center",
+                                  "justifyContent": "center",
+                                  "items": [
+                                    { "type": "Text", "text": "${reportData.options[1].label}", "fontSize": "${@viewportProfile == @hubLandscapeSmall ? '20dp' : '25dp'}", "fontWeight": "700", "color": "#FFFFFF" },
+                                    { "type": "Text", "text": "${reportData.options[1].dayLabel}", "fontSize": "13dp", "color": "#DDEEF3" }
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "TouchWrapper",
+                              "width": "31%",
+                              "onPress": [{
+                                "type": "SendEvent",
+                                "arguments": ["schedule-report-checkin", "${reportData.options[2].time}"]
+                              }],
+                              "item": {
+                                "type": "Frame",
+                                "height": "${@viewportProfile == @hubLandscapeSmall ? '62dp' : '76dp'}",
+                                "borderRadius": "18dp",
+                                "backgroundColor": "rgba(255, 255, 255, 0.16)",
+                                "borderColor": "rgba(214, 199, 255, 0.78)",
+                                "borderWidth": "2dp",
+                                "item": {
+                                  "type": "Container",
+                                  "height": "100%",
+                                  "alignItems": "center",
+                                  "justifyContent": "center",
+                                  "items": [
+                                    { "type": "Text", "text": "${reportData.options[2].label}", "fontSize": "${@viewportProfile == @hubLandscapeSmall ? '20dp' : '25dp'}", "fontWeight": "700", "color": "#FFFFFF" },
+                                    { "type": "Text", "text": "${reportData.options[2].dayLabel}", "fontSize": "13dp", "color": "#DDEEF3" }
+                                  ]
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "Text",
+                          "text": "Tap a time or say yes for the suggested time.",
+                          "fontSize": "${@viewportProfile == @hubLandscapeSmall ? '13dp' : '15dp'}",
+                          "color": "#BCD7E2",
+                          "paddingTop": "12dp"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "Text",
+                      "when": "${!reportData.showFollowupOptions}",
+                      "text": "Your report is safely recorded.",
+                      "fontSize": "${@viewportProfile == @hubLandscapeSmall ? '16dp' : '20dp'}",
+                      "color": "#B9F5E5",
+                      "paddingTop": "20dp"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
