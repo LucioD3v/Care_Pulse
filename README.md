@@ -1,4 +1,4 @@
-# CarePulse — MCP — AI-Assisted Health Tracking & Proactive Agentic Care
+﻿# CarePulse MCP: Consent-First Family Wellness for Alexa
 
 **CarePulse turns voice-reported wellness changes into a consent-gated follow-up workflow, using Alexa, AWS services, and the Model Context Protocol (MCP).**
 
@@ -10,8 +10,46 @@
 [![Node.js 22](https://img.shields.io/badge/Node.js-22-43853D?logo=node.js&logoColor=white)](#technology-and-scope)
 [![Hackathon Candidate](https://img.shields.io/badge/Build%2C_Ship%2C_Shape-orange)](#team-and-hackathon)
 
+[![License](https://img.shields.io/badge/License-Apache--2.0-blue)](LICENSE.txt)
+[![Open Source PR](https://img.shields.io/badge/Open_Source-bee--cli_PR_%2332-2ea44f?logo=github)](https://github.com/bee-computer/bee-cli/pull/32)
+
+> *"I've been a little more tired than usual."*
+> Said out loud, to no one in particular. A week later, the family finds out by phone call.
+
+Families caring for someone they love live between two fears. The caregiver fears *"something is wrong and nobody told me."* The person fears *"if I say anything, I'll be watched all the time."* Dashboards and cameras get switched off. Logging apps get abandoned.
+
+**CarePulse bets on a different shape:** one spoken sentence to Alexa, and **nothing leaves the conversation unless the person says yes**, for one caregiver, one signal and one check-in, for a limited time.
+
 > [!IMPORTANT]
-> **Hackathon demo scope.** Use synthetic records and trusted demo clients. `CARE_MODE=demo` explicitly enables the demo identities and shared MCP key. Bedrock never grants consent or authorizes disclosure. The shared service now revalidates persisted consent, the completed follow-up, and the caregiver binding before publishing, including direct MCP calls. Production onboarding, Alexa+ account linking, and public privacy/terms documents are outside this demo iteration.
+> **Hackathon DEMO Scope.** Use synthetic records and trusted demo clients. `CARE_MODE=demo` explicitly enables the demo identities and shared MCP key. Bedrock never grants consent or authorizes disclosure. The shared service revalidates persisted consent, the completed follow-up, and the caregiver binding before publishing, including direct MCP calls. Production onboarding, production Alexa+ account linking, and terms of service are outside this demo iteration. A [privacy policy](docs/privacy-policy.md) is published for the demo.
+
+## What makes it different
+
+| | |
+|---|---|
+| **The AI never decides who gets told** | Alerting is a deterministic policy. Bedrock only selects approved voice wording, and its free-form output cannot change facts, consent, or delivery. The policy is rechecked at send time, including for direct MCP calls. |
+| **Consent is data, not a prompt** | Each consent record is bound to a member, a caregiver, a signal and one follow-up, and lasts at most 36 hours. Expiry is checked in code on every read; DynamoDB TTL is only the cleanup. |
+| **One brain, two doors** | The Alexa skill and a standalone MCP server share the same care logic and table. The MCP server exposes 12 tools over Streamable HTTP (spec `2025-11-25`), with an OAuth 2.1 + PKCE path for the Alexa+ add-on and latency alarms set against the 500 ms budget. |
+| **Wearable context without surveillance** | A Bee ingestion preview: voice-consented, wearer-only, signals instead of transcripts, and fully deletable by voice. |
+| **Honest by construction** | No claimed proactive wake-up, no emergency SNS override, and "SNS accepted" is never presented as "the caregiver read it." The limits are written down below. |
+
+## Judge quick path
+
+| If you have... | Go to |
+|---|---|
+| 3 minutes | The demo video: https://youtu.be/txsNloLXvb4, then the [voice conversation](#voice-conversation-judge-demo) |
+| 5 minutes | Run the [MCP verification](#verify-the-mcp-server) and read the [consent rules](#privacy-blueprint-and-security) and the [privacy policy](docs/privacy-policy.md) |
+| 10 minutes | Read the policy code: `lambda/care_service.js` (shared rules), `lambda/mcp_tools.js` (tool catalog), `lambda/mcp_http.js` (gateway), and the tests in `lambda/test/` |
+| Curiosity about the wearable | [Bee Wearable Ingestion](#bee-wearable-ingestion-preview) and our [Open Source contribution](#open-source-contribution) |
+
+## Hackathon entries
+
+| | |
+|---|---|
+| **Track** | Alexa+: self-hosted MCP server (spec `2025-11-25`, Streamable HTTP, OAuth 2.1 + PKCE add-on path) |
+| **Mini challenge: AWS Builder** | Amazon Bedrock (Converse), Lambda, API Gateway, DynamoDB, SNS, Cognito, CloudWatch, all deployed from `serverless.yml` |
+| **Mini challenge: Open Source** | PR [bee-computer/bee-cli#32](https://github.com/bee-computer/bee-cli/pull/32), plus this repository under Apache-2.0 ([details](#open-source-contribution)) |
+| **Built during the hackathon** | The entire project -- the Alexa skill, the MCP server, the consent policy, and the Bee ingestion preview -- was built during the hackathon. |
 
 ## Executive Summary
 
@@ -20,6 +58,8 @@ Older adults and people managing ongoing health concerns can experience reportin
 **CarePulse MCP** is a voice-first family wellness orchestration skill for Alexa. It records everyday wellness signals, compares recent reports with a member's configured routine, and offers scheduled follow-ups. Before a caregiver can receive a conditional summary, Alexa requests explicit, sequential consent for a named caregiver, a specific signal, and one follow-up. If the member reports feeling the same or worse at that check-in, the application verifies that consent is still active before publishing a minimal, authorized alert through Amazon SNS.
 
 CarePulse is not a medical device, does not diagnose, and is not an emergency service. The current emergency intent directs the user to local emergency services; it does not send an emergency SNS alert.
+
+**Jump to:** [Demo conversation](#voice-conversation-judge-demo) . [Engineering case study](#engineering-case-study) . [MCP tools](#mcp-toolset-specification) . [Bee ingestion](#bee-wearable-ingestion-preview) . [Open Source](#open-source-contribution) . [Privacy](#privacy-blueprint-and-security) . [Architecture](#runtime-orchestration) . [Deploy](#quickstart-and-deployment)
 
 ## Voice Conversation: Judge Demo
 
@@ -56,7 +96,7 @@ Alexa: Thank you. I recorded the follow-up. The notification service accepted
 
 Without an SNS topic configured, the final response instead says the authorized alert was prepared but the notification service is unavailable, and asks the user to contact Laura directly. If the user answers **better**, CarePulse records the follow-up and does not alert the caregiver. If the user declines consent, the follow-up can remain scheduled but no wellness details are shared.
 
-For the emergency-safety demo, say **“I have chest pain”** or **“I cannot breathe.”** The current `EmergencyGuidanceIntent` tells the user to call local emergency services; it does not invoke SNS or bypass consent.
+For the emergency-safety demo, say **"I have chest pain"** or **"I cannot breathe."** The current `EmergencyGuidanceIntent` tells the user to call local emergency services; it does not invoke SNS or bypass consent.
 
 ## Engineering Case Study
 
@@ -70,13 +110,13 @@ For the emergency-safety demo, say **“I have chest pain”** or **“I cannot 
 
 ![Moment 1 architecture: wellness report, baseline, and scoped consent](docs/momento1_architecture.svg)
 
-**Red-flag behavior:** `EmergencyGuidanceIntent` recognizes emergency language such as chest pain or difficulty breathing and tells the user to contact local emergency services. The proposed `trigger_emergency_alert` consent override is **not implemented**; no automatic SNS alert bypasses consent in the current release. See the target tool specification below.
+**Red-flag behavior:** `EmergencyGuidanceIntent` recognizes emergency language such as chest pain or difficulty breathing and tells the user to contact local emergency services. The proposed `trigger_emergency_alert` consent override is **not implemented**; no automatic SNS alert bypasses consent in the current release. See the design-evolution table below.
 
 ### Moment 2: Scheduled Follow-up and Caregiver Decision
 
 The default follow-up is stored for 6:00 PM in the member's configured time zone. At or after that time, the next Alexa skill launch checks for a due follow-up and asks whether the member feels better, the same, or worse.
 
-- **Better:** the response is recorded, the follow-up is completed, and no caregiver alert is sent. Current voice copy is a neutral acknowledgement; “I'm glad you're feeling better” is a proposed copy improvement, not the exact current response.
+- **Better:** the response is recorded, the follow-up is completed, and no caregiver alert is sent. Current voice copy is a neutral acknowledgement; "I'm glad you're feeling better" is a proposed copy improvement, not the exact current response.
 - **Same or worse:** the policy checks the completed follow-up and a matching, unexpired, signal-scoped consent. If consent is missing or expired, the event is recorded but not shared. If the policy allows sharing, the application sends a short summary through SNS.
 
 ![Moment 2 architecture: due follow-up and consent-gated caregiver action](docs/momento2_architecture.svg)
@@ -86,16 +126,42 @@ The default follow-up is stored for 6:00 PM in the member's configured time zone
 
 ## MCP Toolset Specification
 
-The following six names describe the original target tool contract. The repository now exposes twelve MCP tools; deployment acceptance remains separate. The demo contract uses `ownerId` rather than `user_id`.
+The repository exposes twelve MCP tools through `tools/list`. Deployment acceptance remains separate. The demo contract uses `ownerId` rather than `user_id`.
 
-| MCP tool (target) | Input parameters (target contract) | Purpose and infrastructure backend | Current implementation |
+### Tools currently returned by `tools/list`
+
+| Tool | Purpose |
+| :--- | :--- |
+| `get_care_context` | Retrieve care context, routine, caregiver, and relevant history. |
+| `log_wellness_event` | Record a wellness event. New events expire after the configured retention period (default 90 days). |
+| `get_wellness_history` | Return paginated history (`events`, `period`, `nextCursor`). |
+| `compare_with_baseline` | Compare recent signals with the member's routine using deterministic logic; Bedrock only selects approved voice wording. |
+| `create_followup` | Create a scheduled check-in. |
+| `list_followups` | List pending check-ins. |
+| `complete_followup` | Save the follow-up result and any alert job atomically. It does not itself confirm notification delivery. |
+| `cancel_followup` | Cancel a pending check-in. |
+| `request_consent` | Store scoped, expiring consent (member, caregiver, signal, follow-up ID). |
+| `revoke_consent` | Withdraw a consent record. |
+| `send_caregiver_alert` | Publish a minimum-data notification only after revalidating the persisted consent, the completed result and the recipient binding. The external `authorized` argument was removed, and an outbox claim prevents concurrent duplicate publication. |
+| `ingest_bee_context` | Ingest Bee-derived signals using a link code, gated by voice consent. See [Bee ingestion](#bee-wearable-ingestion-preview). |
+
+The Node.js JSON-RPC Streamable HTTP gateway negotiates `2025-11-25`, `2025-06-18`, or `2025-03-26`. Demo clients use `x-carepulse-mcp-key` and an initialized MCP session. Production mode requires a verified bearer access token and a server-side identity/profile binding.
+
+<details>
+<summary><b>Design evolution: original six-tool contract vs. what shipped</b></summary>
+
+The first design named six tools. This table shows how each one maps to the current implementation, including what was deliberately **not** built.
+
+| MCP tool (original target) | Input parameters (target) | Purpose (target) | Current implementation |
 | :--- | :--- | :--- | :--- |
-| `get_care_context` | `user_id` | Retrieve care context, routine, caregiver, and relevant history from DynamoDB. | Implemented under this name; input is `ownerId, memberName`. |
-| `log_wellness_event` | `user_id, symptom, state, ttl` | Record a wellness event in DynamoDB. | Implemented; input is `ownerId, memberName, signal, state` plus optional details. New events expire after the configured retention period, default 90 days. |
-| `compare_with_baseline` | `current_event, baseline_data` | Compare recent signals with the member's routine; use structured results for the voice experience. | Implemented with deterministic logic using `ownerId, memberName, signal`; Bedrock only selects approved voice wording. |
-| `store_scoped_consent` | `token, rules, ttl_24h` | Persist explicit, narrow permission with a 24-hour expiration. | Consent behavior is implemented as `request_consent`; current default expiry is **36 hours**, not 24. |
-| `trigger_emergency_alert` | `user_id, alert_type` | Proposed red-flag override route to an emergency notification policy and SNS. | **Not exposed or implemented.** Emergency guidance only tells the user to contact emergency services. |
-| `send_caregiver_alert` | `user_id, caregiver_id, summary` | Publish a minimum-data notification to the authorized caregiver through SNS. | Revalidates the persisted consent, completed result, and recipient binding. The external `authorized` argument is removed. An outbox claim prevents concurrent duplicate publication. |
+| `get_care_context` | `user_id` | Retrieve care context, routine, caregiver, and history from DynamoDB. | Implemented under this name; input is `ownerId, memberName`. |
+| `log_wellness_event` | `user_id, symptom, state, ttl` | Record a wellness event. | Implemented; input is `ownerId, memberName, signal, state` plus optional details. |
+| `compare_with_baseline` | `current_event, baseline_data` | Compare recent signals with the routine. | Implemented with deterministic logic using `ownerId, memberName, signal`; Bedrock only selects approved voice wording. |
+| `store_scoped_consent` | `token, rules, ttl_24h` | Persist narrow permission with 24-hour expiration. | Implemented as `request_consent`; current default expiry is **36 hours**, not 24. |
+| `trigger_emergency_alert` | `user_id, alert_type` | Proposed red-flag override route to SNS. | **Not exposed or implemented.** Emergency guidance only tells the user to contact emergency services. |
+| `send_caregiver_alert` | `user_id, caregiver_id, summary` | Publish a minimum-data notification through SNS. | Revalidates consent, completed result and recipient binding. |
+
+</details>
 
 ### Latency (Alexa+ limit: 500 ms)
 
@@ -106,10 +172,6 @@ CAREPULSE_MCP_KEY=<key> node scripts/measure_mcp_latency.js --mcp-url <McpEndpoi
 ```
 
 It reports the first request (which includes any cold start) and p50/p95/max for `ping`, `tools/list`, and `get_care_context`, and exits with an error if the first request or the worst p95 is not under 500 ms. It opens an MCP session (a stored record), and in demo mode `get_care_context` creates a default context for a member that does not exist, so measure with an existing member. With the shared key on a deployment without `DEMO_OWNER_ID`, add `--owner-id <id>`. Use `CAREPULSE_MCP_TOKEN` instead of the key to measure the OAuth path.
-
-### Tools Currently Returned by `tools/list`
-
-The MCP catalog contains `get_care_context`, `log_wellness_event`, `get_wellness_history`, `compare_with_baseline`, `create_followup`, `request_consent`, `send_caregiver_alert`, `ingest_bee_context`, `list_followups`, `complete_followup`, `cancel_followup`, and `revoke_consent`. The Node.js JSON-RPC Streamable HTTP gateway negotiates `2025-11-25`, `2025-06-18`, or `2025-03-26`. Demo clients use `x-carepulse-mcp-key` and an initialized MCP session. Completion saves the result and any alert job atomically; it does not itself confirm notification delivery. Production mode requires a verified bearer access token and a server-side identity/profile binding.
 
 ### Alexa+ add-on (OAuth)
 
@@ -123,16 +185,16 @@ Alexa+ reaches MCP servers through an Alexa+ MCP add-on that requires OAuth 2.1 
 ### Flow
 
 ```
-"Alexa, ask care pulse to link my Bee" ──► consent explained ──► "yes"
-        │
-        └─► link code shown only in the Alexa app card (stored as a SHA-256 hash, expires in 30 days)
+"Alexa, ask care pulse to link my Bee" --> consent explained --> "yes"
+        |
+        +-> link code shown only in the Alexa app card (stored as a SHA-256 hash, expires in 30 days)
 
-Bee app ──► Bee CLI / API ──► caller maps data ──► MCP tools/call ingest_bee_context { linkCode, beeExport }
-        │
-        └─► link + consent verified ──► wearer-only text ──► signals (no transcripts) ──► DynamoDB (provenance: bee)
+Bee app --> Bee CLI / API --> caller maps data --> MCP tools/call ingest_bee_context { linkCode, beeExport }
+        |
+        +-> link + consent verified --> wearer-only text --> signals (no transcripts) --> DynamoDB (provenance: bee)
 
-"Alexa, give me my wellness summary" ──► voice summary + Wellness Snapshot card (Bee 🐝 badge on screens)
-"Alexa, ask care pulse to unlink my Bee" ──► "yes" ──► consent revoked, link code invalid, Bee signals deleted
+"Alexa, give me my wellness summary" --> voice summary + Wellness Snapshot card (Bee badge on screens)
+"Alexa, ask care pulse to unlink my Bee" --> "yes" --> consent revoked, link code invalid, Bee signals deleted
 ```
 
 1. **Consent by voice.** `LinkBeeIntent` explains what is used, what is stored, the 30-day duration (`BEE_CONSENT_DAYS`), and how to stop. Only a "yes" creates the consent and the link code; the code is never spoken aloud.
@@ -162,7 +224,8 @@ Bee app ──► Bee CLI / API ──► caller maps data ──► MCP tools/c
 
 Response: `{ success, eventsIngested, signalsDetected, skipped, ignored: { unconfirmedFacts, otherSpeakerUtterances }, errors }`.
 
-### Testing with a real Bee account
+<details>
+<summary><b>Testing with a real Bee account</b></summary>
 
 `scripts/bee_bridge.js` reads the member's data from the local Bee proxy and sends it to CarePulse. It has no dependencies (Node.js 22+), never prints spoken text, and only sends confirmed facts and lines spoken by the wearer.
 
@@ -185,10 +248,12 @@ Response: `{ success, eventsIngested, signalsDetected, skipped, ignored: { uncon
    CAREPULSE_MCP_KEY=<key> node scripts/bee_bridge.js --bee-url <proxy-url> --wearer-speaker <your-label> --mcp-url <endpoint>/mcp --link-code <code> --send
    ```
    On Windows PowerShell, set the key first with `$env:CAREPULSE_MCP_KEY="<key>"`. Re-running is safe: already-sent items are skipped.
-6. **Check the result.** Say "ask care pulse for my wellness summary". On a screen device the Wellness Snapshot card shows a Bee 🐝 badge on Bee-derived signals.
+6. **Check the result.** Say "ask care pulse for my wellness summary". On a screen device the Wellness Snapshot card shows a Bee badge on Bee-derived signals.
 7. **Clean up.** Say "ask care pulse to unlink my Bee" and answer "yes" to revoke consent and delete Bee-derived signals.
 
 If Bee returns a shape the bridge does not recognize, it stops and asks for `node scripts/bee_schema_report.js <file.json>`, which prints field names and types only, never values.
+
+</details>
 
 ### Known limitations
 
@@ -198,13 +263,34 @@ If Bee returns a shape the bridge does not recognize, it stops and asks for `nod
 - Signal detection is rule-based English and Spanish keyword matching, not a language model. It skips negated symptoms ("not tired", "no estoy triste") and symptoms about other people ("my mom is tired", "mi hijo tiene dolor"), and prefers missing a symptom over attributing someone else's.
 - The MCP API key is still shared; the link code limits which member a caller can write to, not who may call.
 
+## Open Source Contribution
+
+For the Open Source mini challenge, alongside this Apache-2.0 repository, we contributed to Bee's official CLI.
+
+| | |
+|---|---|
+| **Pull request** | [bee-computer/bee-cli#32](https://github.com/bee-computer/bee-cli/pull/32) |
+| **Author** | [@LucioD3v](https://github.com/LucioD3v) |
+| **What** | A new documented example, `examples/wellness-signal-minimizer/`: plain ESM, no build step, no changes to existing files |
+| **Status** | Open, awaiting maintainer review at the time of writing |
+
+**What it does.** The example connects to Bee's local MCP server (`bee mcp serve`, stdio), calls the documented `bee_search` tool, and prints only coarse, aggregated wellness signals (a signal name and an approximate mention count). It never prints transcript text, conversation IDs or timestamps.
+
+**Why it matters.** Bee context is private by nature. The example gives developers a small, reusable reference for a pattern we apply throughout CarePulse: **minimize before you share.** Whatever leaves the machine should first be reduced to the least informative form that still answers the question.
+
+**How it was tested.** On Windows 11 with Node 24 and Bun 1.4.3, built from `bee-cli` `main` at `fa9580d` (0.9.0) and a real Bee account. The repo's typecheck and build pass with and without the example, and the example's outputs and error paths were checked. The PR lists the exact results, including what was *not* tested (macOS, Linux, Bun runtime, high-volume accounts).
+
+**How it relates to CarePulse.** CarePulse's Bee bridge already limits what is sent (confirmed facts and wearer lines only) and the server stores signals, never Bee text. The PR pushes the same principle one step further toward the edge: a local minimizer that emits only counts. The two are complementary and independent: the PR is a standalone example for the Bee ecosystem, not a dependency of this project.
+
 ## Privacy Blueprint and Security
+
+CarePulse publishes a plain-language **[Privacy Policy](docs/privacy-policy.md)** (last updated October 14, 2026) covering what is collected, how it is used, retention periods, user choices (including "unlink my Bee" and declining caregiver alerts), and security. The numbers in it (36-hour consent, 30-day Bee permission, 90-day default retention, 14-day logs) match the implementation described below.
 
 ### Consent Expiration and DynamoDB TTL
 
 The DynamoDB table enables TTL on the numeric `expiresAt` attribute. Consent checks also compare `expiresAt` with the current time before allowing a disclosure, so an expired record is denied by application policy even if DynamoDB has not physically deleted it yet.
 
-**Consent lasts at most 36 hours.** MCP sessions expire after one hour. New voice, follow-up-result, seeded, and Bee events use `WELLNESS_RETENTION_DAYS` (default 90, allowed 1–365). Expired events are excluded from history before asynchronous DynamoDB TTL deletion finishes. Existing records without TTL, care contexts, follow-ups, alert jobs, backups, and other metadata still need a separate production retention/migration policy. Bee consent defaults to 30 days. The care table is retained on stack deletion and has point-in-time recovery enabled.
+**Consent lasts at most 36 hours.** MCP sessions expire after one hour. New voice, follow-up-result, seeded, and Bee events use `WELLNESS_RETENTION_DAYS` (default 90, allowed 1-365). Expired events are excluded from history before asynchronous DynamoDB TTL deletion finishes. Existing records without TTL, care contexts, follow-ups, alert jobs, backups, and other metadata still need a separate production retention/migration policy. Bee consent defaults to 30 days. The care table is retained on stack deletion and has point-in-time recovery enabled.
 
 ### Minimum Disclosure and Operational Boundaries
 
@@ -217,7 +303,7 @@ The DynamoDB table enables TTL on the numeric `expiresAt` attribute. Consent che
 - SNS acceptance confirms that SNS accepted a publish request; it does not prove that a caregiver received or read the notification.
 
 > [!IMPORTANT]
-> Public privacy/terms documents and production identity-provider setup are deliberately deferred for the hackathon. They are not marked completed in the improvement plan. A real-data release needs its own eligibility, consent, retention, security, and deployment review.
+> A demo-scope [privacy policy](docs/privacy-policy.md) is published. Terms of service and production identity-provider setup are deliberately deferred for the hackathon and are not marked completed in the improvement plan. A real-data release needs its own eligibility, consent, retention, security, and deployment review.
 
 ## Architecture and Repository Layout
 
@@ -344,15 +430,15 @@ After deployment:
 
 1. Read the CloudFormation outputs `AlexaLambdaArn`, `McpEndpoint`, `CarePulseTableName`, and `CaregiverAlertsTopicArn`.
 2. In Alexa Developer Console, open your custom skill and confirm its Skill ID matches the `alexaSkillId` deployment parameter.
-3. Under **Build → Interaction Model → JSON Editor**, paste the contents of `skill-package/interactionModels/custom/en-US.json`, save, and build the model. Confirm the locale is **English (US)** and the invocation name is **care pulse**. Enable the `Alexa.Presentation.APL` interface to test the optional dashboard on supported devices.
-4. Under **Build → Endpoint**, select **AWS Lambda ARN** for the skill's endpoint region and paste `AlexaLambdaArn`. Save the endpoint.
+3. Under **Build -> Interaction Model -> JSON Editor**, paste the contents of `skill-package/interactionModels/custom/en-US.json`, save, and build the model. Confirm the locale is **English (US)** and the invocation name is **care pulse**. Enable the `Alexa.Presentation.APL` interface to test the optional dashboard on supported devices.
+4. Under **Build -> Endpoint**, select **AWS Lambda ARN** for the skill's endpoint region and paste `AlexaLambdaArn`. Save the endpoint.
 5. Open **Test**, switch the test stage to **Development**, and enable testing for the development version of the skill. Use the Alexa simulator input to send the utterances below; the test tab invokes the deployed Lambda, so AWS credentials, Bedrock model access, and the deployed resources must already be valid.
 6. Subscribe the authorized test caregiver to `CaregiverAlertsTopicArn`. Confirm the email subscription before running the notification scene.
 7. Keep the returned MCP session ID and send it on later requests. Every MCP request must include the `x-carepulse-mcp-key` header.
 
 ### Smoke Test in Alexa Developer Console
 
-This is the actual ASK SDK conversation flow, split into setup and a later check-in. In **Test → Development**, enter phrases without the wake word. Use seeded demo data and start before 6:00 PM in the configured time zone so the follow-up is due that day.
+This is the actual ASK SDK conversation flow, split into setup and a later check-in. In **Test -> Development**, enter phrases without the wake word. Use seeded demo data and start before 6:00 PM in the configured time zone so the follow-up is due that day.
 
 | Console input | What the handler does | Expected next response |
 | :--- | :--- | :--- |
@@ -372,13 +458,18 @@ The simulator does not advance Lambda's clock. For the normal demo, start before
 
 To verify the no-alert branch, repeat with a test identity, decline the second permission question, and complete the due check-in; or answer `I feel better` after a consented check-in. Try `Give me my wellness summary` to test `GetWellnessSummaryIntent`.
 
-### Voice and screen preferences
+<details>
+<summary><b>Voice and screen preferences</b></summary>
 
 The ASK skill supports English (US) preference commands: `use short summaries`, `use detailed summaries`, `set my follow up time to eight PM`, and `turn off follow up suggestions` (`turn on follow up suggestions` restores them). Summary length changes spoken detail; the card still contains the full summary. The preferred time applies to newly created follow-ups when the user does not specify a time. Turning suggestions off leaves reporting and explicit follow-up requests available. The current MVP stores these preferences in the member context.
 
 On an APL-capable device, an explicit summary request includes a simple dashboard with the latest report from the last 30 days, the next stored follow-up, and the active permission for the default caregiver on that follow-up. The summary remains fully usable by voice without APL. The interface is declared in `skill-package/skill.json`; enable it in the Developer Console as well if updating the skill there manually. This dashboard is part of the ASK experience, not a registered Alexa+ MCP App UI. See [Amazon's ASK APL integration guide](https://developer.amazon.com/en-US/docs/alexa/alexa-presentation-language/use-apl-with-ask-sdk.html).
 
-If the Skill does not respond as expected, verify that the interaction model built successfully, the `AlexaLambdaArn` and region are correct under **Build → Endpoint**, and the stage is **Development**. Then inspect the `alexaSkill` Lambda logs in CloudWatch. Voice remains available without Bedrock. Inspect `VoiceFallbacks` to diagnose optional model failures.
+If the Skill does not respond as expected, verify that the interaction model built successfully, the `AlexaLambdaArn` and region are correct under **Build -> Endpoint**, and the stage is **Development**. Then inspect the `alexaSkill` Lambda logs in CloudWatch. Voice remains available without Bedrock. Inspect `VoiceFallbacks` to diagnose optional model failures.
+
+</details>
+
+### Verify the MCP server
 
 Initialize the MCP protocol session (replace the endpoint and key with deployment values):
 
@@ -390,7 +481,7 @@ curl -i "$CAREPULSE_MCP_ENDPOINT" \
   --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"carepulse-demo","version":"1.0.0"}}}'
 ```
 
-The response includes `Mcp-Session-Id` and the negotiated protocol version. Send `notifications/initialized` before calling tools, and include the session and `Mcp-Protocol-Version` headers on subsequent requests. History results now contain `events`, `period`, and `nextCursor`; follow the cursor for additional pages. See [the MCP contract and operations guide](docs/development-operations.md#mcp-contract).
+The response includes `Mcp-Session-Id` and the negotiated protocol version. Send `notifications/initialized` before calling tools, and include the session and `Mcp-Protocol-Version` headers on subsequent requests. History results contain `events`, `period`, and `nextCursor`; follow the cursor for additional pages. See [the MCP contract and operations guide](docs/development-operations.md#mcp-contract).
 
 ### Seed Demo Data
 
@@ -447,4 +538,6 @@ To remove the compute stack after the event, use `npx serverless@4 remove` with 
 
 ## Team and Hackathon
 
-Built by **Vicente, Ethel and Emmanuel** for **Build, Ship, Shape: Amazon Developer Hackathon**. CarePulse MCP is a hackathon candidate project; this README does not claim an award or production medical certification.
+Built by **Vicente Guzmán, Ethel González and Emmanuel Islas** for **Build, Ship, Shape: Amazon Developer Hackathon**.
+
+CarePulse MCP is a hackathon candidate project; this README does not claim an award or production medical certification.
