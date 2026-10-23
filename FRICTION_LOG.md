@@ -1,21 +1,21 @@
 ﻿# CarePulse MCP — Developer Experience & Friction Log
 
-This document outlines the key technical friction points encountered while integrating the Model Context Protocol (MCP), AWS Bedrock, Bee Agent Framework, and Alexa ASK SDK during the Build, Ship, Shape: Amazon Developer Hackathon.
+This document outlines the key technical friction points encountered while integrating the Model Context Protocol (MCP), AWS Bedrock, the Bee Wearable CLI, and the Alexa ASK SDK during the Build, Ship, Shape: Amazon Developer Hackathon.
 
 ---
 
-## Entry 1: High Response Latency during Conversational Multi-Step MCP Tool Execution with Alexa
+## Entry 1: An LLM-Driven Reasoning Loop Could Not Meet the Alexa+ 500 ms Round-Trip Budget
 
-* **Task Attempted:** Executing sequential MCP tool calls (`get_care_context` -> `compare_with_baseline` -> `request_consent`) inside an active Alexa+ voice session.
+* **Task Attempted:** Our first design had an LLM drive the conversation, reasoning over sequential MCP tool calls (`get_care_context` -> `compare_with_baseline` -> `request_consent`) inside an active Alexa+ voice session.
 * **Steps Taken:**
-  1. Configured the Alexa Lambda Handler to invoke the Bee Agent framework.
-  2. The agent received user speech input and initiated a multi-turn reasoning loop via AWS Bedrock.
-  3. The agent evaluated baseline vitals and requested consent confirmation in real time.
+  1. Prototyped an LLM-driven loop in the Alexa Lambda handler that let AWS Bedrock plan and chain MCP tool calls.
+  2. The model received user speech input and ran a multi-turn reasoning loop, calling MCP tools between turns.
+  3. The model evaluated the baseline comparison and attempted to drive the consent confirmation in real time.
 * **Expected Result:** Voice interaction would remain fluid, staying within the Alexa+ MCP round-trip limit of 500 ms per call for natural voice conversations.
-* **Actual Result:** The multi-step agentic loop (LLM reasoning + MCP JSON-RPC tool roundtrips) introduced a latency of 3.2 to 4.5 seconds, causing Alexa audio timeouts (far exceeding the 500 ms Alexa+ round-trip budget and the standard ASK SDK response window).
+* **Actual Result:** The multi-step LLM loop (model reasoning + MCP JSON-RPC tool roundtrips) introduced a latency of 3.2 to 4.5 seconds, causing Alexa audio timeouts (far exceeding the 500 ms Alexa+ round-trip budget and the standard ASK SDK response window). The loop also made outcomes non-deterministic, which is unacceptable for a consent and alerting decision.
 * **Severity Rating:** **High (Blocker for Voice UX)**
-* **Workaround Used:** Implemented an early-exit execution strategy and parallelized non-dependent MCP tool calls. For routine check-ins, local deterministic logic resolves simple responses ("Better") in single-digit milliseconds, reserving full AWS Bedrock LLM execution strictly for complex symptom triage ("Same or Worse"). The MCP Lambda also uses provisioned concurrency (`mcpProvisionedConcurrency`) and CloudWatch alarms (`McpLatencyAlarm` at p95 400 ms) to keep cold starts off the request path, and `scripts/measure_mcp_latency.js` enforces the 500 ms budget in CI.
-* **Actionable Suggestion:** Provide a lightweight, asynchronous streaming interface or pre-warmed agent execution context within the ASK SDK / MCP connector to allow partial audio streaming or progressive SSML prompts while the background LLM agent resolves tool calls.
+* **Resolution (approach we shipped):** We rejected the LLM-driven loop. CarePulse now uses deterministic ASK SDK handlers for the conversation, consent, and alerting policy; nothing agentic sits on the request path. AWS Bedrock is reduced to a single, bounded `Converse` call in `lambda/voice_agent.js` that only selects an approved voice template (`standard` or `neutral`) and never decides facts, consent, or delivery; on any timeout or invalid output it falls back to deterministic copy. The MCP Lambda also uses provisioned concurrency (`mcpProvisionedConcurrency`) and CloudWatch alarms (`McpLatencyAlarm` at p95 400 ms) to keep cold starts off the request path, and `scripts/measure_mcp_latency.js` enforces the 500 ms budget in CI.
+* **Actionable Suggestion:** For voice assistants with a hard round-trip budget, a lightweight asynchronous streaming interface (partial audio / progressive SSML prompts while background work resolves) in the ASK SDK / MCP connector would let teams keep some model-in-the-loop flexibility without blowing the latency budget.
 
 ---
 

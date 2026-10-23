@@ -14,3 +14,5 @@ artifacts/
 /Dockerfile.localstack
 /infrastructure/localstack/
 /test/events/
+# Agent working artifacts (internal, not part of the project)
+.agents/
